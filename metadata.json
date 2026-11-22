@@ -1,0 +1,6 @@
+{
+  "name": "PROJECT DHAKA — GTA Bangladesh",
+  "description": "An open-world 3D action game set in a living Dhaka, featuring authentic Bangladeshi vehicles, Old Dhaka to Gulshan districts, dynamic monsoon weather, police chases, and an original crime-action storyline.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
