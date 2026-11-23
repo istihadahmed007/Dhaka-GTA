@@ -109,8 +109,17 @@ export const GameHud: React.FC<GameHudProps> = ({
               <span>·</span>
               <span>{hud.timeLabel}</span>
               <span>·</span>
-              <span className="uppercase">{hud.weather}</span>
+              <span className="uppercase">
+                {hud.liveWeather.enabled && hud.liveWeather.status === 'live' && hud.liveWeather.temperatureC !== null
+                  ? `${hud.liveWeather.temperatureC}°C ${hud.weather}`
+                  : hud.weather}
+              </span>
             </div>
+            {hud.streetName && (
+              <div className="text-[9px] text-[#94a3b8] mt-0.5 tracking-wide leading-none">
+                {hud.streetName}
+              </div>
+            )}
           </div>
 
           <button
@@ -249,6 +258,7 @@ export const GameHud: React.FC<GameHudProps> = ({
           playerHeading={hud.playerHeading}
           blips={hud.blips}
           wantedLevel={hud.wantedLevel}
+          inVehicle={hud.inVehicle}
         />
 
         <div className="w-36 sm:w-44 bg-[#10151c]/90 border border-white/12 p-2.5 shadow-[0_6px_18px_rgba(0,0,0,0.65)] flex flex-col gap-1.5">

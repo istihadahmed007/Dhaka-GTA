@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { DhakaGameEngine } from './game/engine';
-import { HudSnapshot, OutfitId, TimePreset, WeaponId, WeatherMode } from './game/types';
+import { GraphicsQualityPreset, HudSnapshot, OutfitId, TimePreset, WeaponId, WeatherMode } from './game/types';
+import { STORY_MISSIONS } from './game/worldData';
+import { FALLBACK_DHAKA_REGIONAL_PLACES } from './api/bdapisClient';
 import { TitleScreen } from './components/TitleScreen';
 import { GameHud } from './components/GameHud';
 import { Overlays } from './components/Overlays';
@@ -10,9 +12,31 @@ const INITIAL_HUD: HudSnapshot = {
   modal: 'none',
   districtName: 'Old Dhaka · Chawkbazar',
   districtBangla: 'পুরান ঢাকা · চকবাজার',
+  streetName: 'Kazi Nazrul Islam Ave',
+  streetBangla: 'কাজী নজরুল ইসলাম এভিনিউ',
   timeOfDay: 15.8,
   timeLabel: '3:48 PM',
   weather: 'clear',
+  graphicsQuality: 'high',
+  characterRigMode: 'procedural',
+  liveWeather: {
+    enabled: false,
+    status: 'idle',
+    conditionLabel: null,
+    conditionBangla: null,
+    temperatureC: null,
+    humidityPct: null,
+    windKmh: null,
+    fromCache: false,
+    error: null,
+  },
+  regionalPlaces: {
+    enabled: false,
+    status: 'idle',
+    source: 'fallback',
+    places: [...FALLBACK_DHAKA_REGIONAL_PLACES],
+    error: null,
+  },
   hp: 100,
   maxHp: 100,
   armor: 50,
@@ -54,7 +78,7 @@ const INITIAL_HUD: HudSnapshot = {
   stats: {
     kills: 0,
     missionsCompleted: 0,
-    totalMissions: 4,
+    totalMissions: STORY_MISSIONS.length,
     faresCompleted: 0,
     playTimeSec: 0,
     cause: '',
@@ -90,6 +114,19 @@ export default function App() {
   const handleToggleFare = useCallback(() => engineRef.current?.toggleSideFare(), []);
   const handleSetTime = useCallback((t: TimePreset) => engineRef.current?.setTimePreset(t), []);
   const handleSetWeather = useCallback((w: WeatherMode) => engineRef.current?.setWeather(w), []);
+  const handleSetGraphicsQuality = useCallback(
+    (q: GraphicsQualityPreset) => engineRef.current?.setGraphicsQuality(q),
+    [],
+  );
+  const handleToggleLiveWeather = useCallback(
+    (enabled: boolean) => engineRef.current?.setLiveWeatherEnabled(enabled),
+    [],
+  );
+  const handleRefreshLiveWeather = useCallback(() => engineRef.current?.refreshLiveWeather(), []);
+  const handleToggleRegionalPlaces = useCallback(
+    (enabled: boolean) => engineRef.current?.setRegionalPlacesEnabled(enabled),
+    [],
+  );
   const handleShopBuy = useCallback((item: 'biriyani' | 'armor' | WeaponId) => engineRef.current?.handleShopPurchase(item), []);
   const handleGarage = useCallback(
     (svc: 'repair' | 'clear_heat' | 'paint', color?: number) => engineRef.current?.handleGarageAction(svc, color),
@@ -125,6 +162,10 @@ export default function App() {
         onCloseModal={handleCloseModal}
         onSetTime={handleSetTime}
         onSetWeather={handleSetWeather}
+        onSetGraphicsQuality={handleSetGraphicsQuality}
+        onToggleLiveWeather={handleToggleLiveWeather}
+        onRefreshLiveWeather={handleRefreshLiveWeather}
+        onToggleRegionalPlaces={handleToggleRegionalPlaces}
         onShopBuy={handleShopBuy}
         onGarageService={handleGarage}
         onOutfitSelect={handleOutfit}

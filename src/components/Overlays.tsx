@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  GraphicsQualityPreset,
   HudSnapshot,
   OutfitId,
   OUTFIT_SPECS,
@@ -8,6 +9,9 @@ import {
   WEAPON_SPECS,
   WeatherMode,
 } from '../game/types';
+import { OPEN_METEO_ATTRIBUTION } from '../api/openMeteoClient';
+import { BDAPIS_ATTRIBUTION } from '../api/bdapisClient';
+import { OSM_ATTRIBUTION_NOTE } from '../game/dhakaGeoData';
 
 interface OverlaysProps {
   hud: HudSnapshot;
@@ -17,6 +21,10 @@ interface OverlaysProps {
   onCloseModal: () => void;
   onSetTime: (t: TimePreset) => void;
   onSetWeather: (w: WeatherMode) => void;
+  onSetGraphicsQuality: (q: GraphicsQualityPreset) => void;
+  onToggleLiveWeather: (enabled: boolean) => void;
+  onRefreshLiveWeather: () => void;
+  onToggleRegionalPlaces: (enabled: boolean) => void;
   onShopBuy: (item: 'biriyani' | 'armor' | WeaponId) => void;
   onGarageService: (svc: 'repair' | 'clear_heat' | 'paint', color?: number) => void;
   onOutfitSelect: (id: OutfitId) => void;
@@ -39,19 +47,25 @@ export const Overlays: React.FC<OverlaysProps> = ({
   onCloseModal,
   onSetTime,
   onSetWeather,
+  onSetGraphicsQuality,
+  onToggleLiveWeather,
+  onRefreshLiveWeather,
+  onToggleRegionalPlaces,
   onShopBuy,
   onGarageService,
   onOutfitSelect,
 }) => {
   // 1. PAUSE MODAL
   if (hud.phase === 'paused') {
+    const lw = hud.liveWeather;
+    const rp = hud.regionalPlaces;
     return (
-      <div className="fixed inset-0 z-30 flex items-center justify-center bg-[#070a0f]/82 p-4">
+      <div className="fixed inset-0 z-30 flex items-center justify-center bg-[#070a0f]/82 p-4 overflow-y-auto">
         <div
           role="dialog"
           aria-modal="true"
           aria-label="Game Paused"
-          className="w-full max-w-lg bg-[#111720] border-t-4 border-[#e6a135] border-x border-b border-white/15 p-6 shadow-[0_24px_60px_rgba(0,0,0,0.85)]"
+          className="w-full max-w-xl bg-[#111720] border-t-4 border-[#e6a135] border-x border-b border-white/15 p-5 sm:p-6 shadow-[0_24px_60px_rgba(0,0,0,0.85)] max-h-[92vh] overflow-y-auto"
         >
           <div className="flex items-baseline justify-between border-b border-white/10 pb-3">
             <h2 className="font-display text-3xl font-extrabold uppercase tracking-wider text-[#f8f5ee]">
@@ -91,9 +105,11 @@ export const Overlays: React.FC<OverlaysProps> = ({
                     type="button"
                     onClick={() => onSetWeather(w)}
                     className={`px-2 py-1 text-xs font-semibold uppercase transition-colors cursor-pointer ${
-                      hud.weather === w
+                      hud.weather === w && !lw.enabled
                         ? 'bg-[#e6a135] text-[#0b0e13]'
-                        : 'bg-[#1b2432] hover:bg-[#0f7a53] text-[#f5f2eb]'
+                        : hud.weather === w
+                          ? 'bg-[#e6a135]/75 text-[#0b0e13]'
+                          : 'bg-[#1b2432] hover:bg-[#0f7a53] text-[#f5f2eb]'
                     }`}
                   >
                     {w === 'clear' ? 'Clear Tropical' : w === 'monsoon' ? 'Monsoon Rain' : 'Thunderstorm'}
@@ -103,13 +119,162 @@ export const Overlays: React.FC<OverlaysProps> = ({
             </div>
           </div>
 
-          <div className="mt-4 bg-[#0b0f16] p-3 border border-white/10 text-xs text-[#cbd5e1] leading-relaxed">
+          {/* Scalable Graphics Quality Preset (Low / Medium / High) */}
+          <div className="mt-3 bg-[#0b0f16] p-3 border border-white/10">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-[#94a3b8]">
+                Graphics Quality
+              </div>
+              <span className="text-[10px] uppercase tracking-wider text-[#64748b]">
+                {hud.characterRigMode === 'glb' ? 'Rigged GLB Characters Active' : 'Sculpted Procedural Fallback'}
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-1.5">
+              {(['low', 'medium', 'high'] as GraphicsQualityPreset[]).map((q) => (
+                <button
+                  key={q}
+                  type="button"
+                  data-testid={`quality-${q}`}
+                  onClick={() => onSetGraphicsQuality(q)}
+                  className={`px-2 py-1.5 text-xs font-semibold uppercase transition-colors cursor-pointer ${
+                    hud.graphicsQuality === q
+                      ? 'bg-[#e6a135] text-[#0b0e13]'
+                      : 'bg-[#1b2432] hover:bg-[#0f7a53] text-[#f5f2eb]'
+                  }`}
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Optional Open-Meteo Real-World Dhaka Weather */}
+          <div className="mt-3 bg-[#0b0f16] p-3 border border-white/10">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="text-[11px] font-bold uppercase tracking-wider text-[#f5d07a]">
+                  Use Dhaka Real-World Weather
+                </div>
+                <div className="text-[10px] text-[#94a3b8]">
+                  Optional Open-Meteo sync (cached 30 min · manual [V] always overrides)
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5">
+                {lw.enabled && (
+                  <button
+                    type="button"
+                    onClick={onRefreshLiveWeather}
+                    disabled={lw.status === 'loading'}
+                    className="px-2.5 py-1 text-[11px] font-bold uppercase bg-[#1b2432] hover:bg-[#334155] disabled:opacity-50 text-[#e2e8f0] cursor-pointer"
+                  >
+                    Refresh
+                  </button>
+                )}
+                <button
+                  type="button"
+                  data-testid="toggle-live-weather"
+                  onClick={() => onToggleLiveWeather(!lw.enabled)}
+                  className={`px-3 py-1 text-[11px] font-bold uppercase cursor-pointer transition-colors ${
+                    lw.enabled
+                      ? 'bg-[#0f7a53] text-[#f8f5ee] border border-[#34d399]'
+                      : 'bg-[#1b2432] hover:bg-[#0f7a53] text-[#cbd5e1] border border-white/15'
+                  }`}
+                >
+                  {lw.enabled ? 'Enabled' : 'Off'}
+                </button>
+              </div>
+            </div>
+
+            {lw.enabled && (
+              <div className="mt-2 pt-2 border-t border-white/10 text-xs">
+                {lw.status === 'loading' && (
+                  <span className="text-[#94a3b8]">Fetching Dhaka current conditions...</span>
+                )}
+                {lw.status === 'live' && lw.temperatureC !== null && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[#e2e8f0]">
+                    <span>
+                      <strong className="text-[#34d399] tabular-nums">{lw.temperatureC}°C</strong>
+                      {' · '}
+                      {lw.conditionLabel}
+                      {lw.conditionBangla ? (
+                        <span className="font-bangla text-[#f5d07a] ml-1.5">{lw.conditionBangla}</span>
+                      ) : null}
+                    </span>
+                    <span className="text-[10px] text-[#94a3b8] tabular-nums">
+                      {lw.humidityPct !== null ? `RH ${lw.humidityPct}%` : ''}
+                      {lw.windKmh !== null ? ` · Wind ${lw.windKmh} km/h` : ''}
+                      {lw.fromCache ? ' · Cached' : ''}
+                    </span>
+                  </div>
+                )}
+                {lw.status === 'error' && (
+                  <span className="text-[#fca5a5]">{lw.error ?? 'Weather unavailable — manual controls remain active.'}</span>
+                )}
+              </div>
+            )}
+
+            <div className="mt-1.5 text-[10px] text-[#64748b]">{OPEN_METEO_ATTRIBUTION}</div>
+          </div>
+
+          {/* Optional BDAPIs Dhaka Division Regional Directory */}
+          <div className="mt-3 bg-[#0b0f16] p-3 border border-white/10">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="text-[11px] font-bold uppercase tracking-wider text-[#cbd5e1]">
+                  Dhaka Division Regional Directory (Optional)
+                </div>
+                <div className="text-[10px] text-[#94a3b8]">
+                  Bangla &amp; English inter-district destinations · Core Dhaka City districts unchanged
+                </div>
+              </div>
+              <button
+                type="button"
+                data-testid="toggle-regional-places"
+                onClick={() => onToggleRegionalPlaces(!rp.enabled)}
+                className={`px-3 py-1 text-[11px] font-bold uppercase cursor-pointer transition-colors ${
+                  rp.enabled
+                    ? 'bg-[#0f7a53] text-[#f8f5ee] border border-[#34d399]'
+                    : 'bg-[#1b2432] hover:bg-[#334155] text-[#cbd5e1] border border-white/15'
+                }`}
+              >
+                {rp.enabled ? 'Hide' : 'Load BDAPIs'}
+              </button>
+            </div>
+
+            {rp.enabled && (
+              <div className="mt-2 pt-2 border-t border-white/10">
+                {rp.status === 'loading' ? (
+                  <div className="text-xs text-[#94a3b8]">Loading Dhaka Division place names...</div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                      {rp.places.slice(0, 6).map((place) => (
+                        <div key={place.name} className="bg-[#111720] border border-white/10 px-2 py-1">
+                          <div className="text-[11px] font-semibold text-[#f5f2eb] leading-tight">{place.name}</div>
+                          <div className="font-bangla text-[10px] text-[#f5d07a] leading-tight">{place.banglaName}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-1.5 flex flex-wrap items-center justify-between gap-1 text-[10px] text-[#64748b]">
+                      <span>
+                        {rp.source === 'bdapis' ? BDAPIS_ATTRIBUTION : 'Using authored local Dhaka Division fallback'}
+                      </span>
+                      {rp.error && <span className="text-[#fca5a5]">{rp.error}</span>}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="mt-3 bg-[#0b0f16] p-3 border border-white/10 text-xs text-[#cbd5e1] leading-relaxed">
             <strong className="text-[#f5d07a] uppercase">Controls:</strong> WASD Move/Drive · Space Jump/Handbrake ·
             Q/E or Right-Drag Camera · F Enter/Exit Vehicle · Left Click / J Attack · 1–4 Weapons · R Reload · H Horn ·
             G Shop/Garage · C Wardrobe · N CNG Fare Job
+            <div className="mt-1 text-[10px] text-[#64748b]">{OSM_ATTRIBUTION_NOTE}</div>
           </div>
 
-          <div className="mt-6 flex flex-wrap gap-3">
+          <div className="mt-5 flex flex-wrap gap-3">
             <button
               type="button"
               onClick={onResume}

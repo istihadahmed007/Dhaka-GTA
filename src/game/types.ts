@@ -1,6 +1,18 @@
+import type { GraphicsQualityPreset } from './graphicsQuality';
+export type { GraphicsQualityPreset } from './graphicsQuality';
+
 export type GamePhase = 'title' | 'playing' | 'paused' | 'gameover' | 'victory';
 
-export type DistrictId = 'old_dhaka' | 'shapla_crossing' | 'gulshan' | 'kawran_flyover' | 'sadarghat';
+export type DistrictId =
+  | 'old_dhaka'
+  | 'shapla_crossing'
+  | 'gulshan'
+  | 'kawran_flyover'
+  | 'sadarghat'
+  | 'motijheel'
+  | 'dhanmondi'
+  | 'uttara_north'
+  | 'mirpur_market';
 
 export type VehicleKind = 'cng' | 'rickshaw' | 'sedan' | 'bus' | 'truck' | 'bike' | 'police';
 
@@ -212,14 +224,46 @@ export interface MinimapBlip {
   kind: 'mission' | 'garage' | 'shop' | 'police' | 'enemy' | 'vehicle' | 'fare';
 }
 
+export interface LiveWeatherHudState {
+  enabled: boolean;
+  status: 'idle' | 'loading' | 'live' | 'error';
+  conditionLabel: string | null;
+  conditionBangla: string | null;
+  temperatureC: number | null;
+  humidityPct: number | null;
+  windKmh: number | null;
+  fromCache: boolean;
+  error: string | null;
+}
+
+export interface RegionalPlaceItem {
+  name: string;
+  banglaName: string;
+  upazilas: string[];
+}
+
+export interface RegionalPlacesHudState {
+  enabled: boolean;
+  status: 'idle' | 'loading' | 'ready' | 'error';
+  source: 'bdapis' | 'fallback';
+  places: RegionalPlaceItem[];
+  error: string | null;
+}
+
 export interface HudSnapshot {
   phase: GamePhase;
   modal: InteractModalKind;
   districtName: string;
   districtBangla: string;
+  streetName: string | null;
+  streetBangla: string | null;
   timeOfDay: number; // 0..24 hours
   timeLabel: string;
   weather: WeatherMode;
+  graphicsQuality: GraphicsQualityPreset;
+  characterRigMode: 'glb' | 'procedural';
+  liveWeather: LiveWeatherHudState;
+  regionalPlaces: RegionalPlacesHudState;
   hp: number;
   maxHp: number;
   armor: number;

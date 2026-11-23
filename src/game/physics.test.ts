@@ -12,8 +12,80 @@ import {
   stepVehicleKinematics,
   tickWantedCooldown,
 } from './physics';
-import { buildStaticColliders, getDistrictAt, RIVER_Z_START } from './worldData';
+import {
+  BUILDINGS,
+  buildStaticColliders,
+  FARE_DESTINATIONS,
+  getDistrictAt,
+  INITIAL_VEHICLES,
+  POIS,
+  RIVER_Z_START,
+  ROAD_SEGMENTS,
+  STORY_MISSIONS,
+  TRAFFIC_ROUTES,
+  WORLD_HALF_SIZE,
+} from './worldData';
 import { VehicleState, VEHICLE_SPECS } from './types';
+
+test('expanded city bounds are ~2.5x original dimensions and contain dense generated blocks', () => {
+  assert.ok(WORLD_HALF_SIZE >= 250, `Expected expanded WORLD_HALF_SIZE >= 250, got ${WORLD_HALF_SIZE}`);
+  assert.ok(RIVER_Z_START >= 190, `Expected expanded RIVER_Z_START >= 190, got ${RIVER_Z_START}`);
+  assert.ok(BUILDINGS.length >= 90, `Expected substantial city density (>= 90 buildings), got ${BUILDINGS.length}`);
+});
+
+test('no building overlaps any road segment across the entire expanded Dhaka road network', () => {
+  for (const b of BUILDINGS) {
+    const bMinX = b.x - b.w / 2;
+    const bMaxX = b.x + b.w / 2;
+    const bMinZ = b.z - b.d / 2;
+    const bMaxZ = b.z + b.d / 2;
+
+    for (const seg of ROAD_SEGMENTS) {
+      const rMinX = Math.min(seg.x1, seg.x2) - seg.width / 2;
+      const rMaxX = Math.max(seg.x1, seg.x2) + seg.width / 2;
+      const rMinZ = Math.min(seg.z1, seg.z2) - seg.width / 2;
+      const rMaxZ = Math.max(seg.z1, seg.z2) + seg.width / 2;
+      const overlaps = bMaxX > rMinX && bMinX < rMaxX && bMaxZ > rMinZ && bMinZ < rMaxZ;
+      assert.equal(
+        overlaps,
+        false,
+        `Building ${b.id} (${b.x},${b.z} ${b.w}x${b.d}) overlaps road ${seg.id}`,
+      );
+    }
+  }
+});
+
+test('all POIs, mission targets, fare destinations, vehicle spawns, and traffic routes stay inside playable bounds', () => {
+  const colliders = buildStaticColliders();
+  const checkInBounds = (label: string, x: number, z: number) => {
+    assert.ok(Math.abs(x) < WORLD_HALF_SIZE - 4, `${label} X=${x} out of bounds`);
+    assert.ok(z > -WORLD_HALF_SIZE + 4 && z < RIVER_Z_START - 2, `${label} Z=${z} out of bounds`);
+  };
+
+  for (const poi of POIS) {
+    checkInBounds(`POI ${poi.id}`, poi.x, poi.z);
+  }
+  for (const m of STORY_MISSIONS) {
+    for (const step of m.steps) {
+      checkInBounds(`Mission ${m.id}/${step.id}`, step.targetX, step.targetZ);
+    }
+  }
+  for (const f of FARE_DESTINATIONS) {
+    checkInBounds(`Fare ${f.label}`, f.x, f.z);
+    const res = resolveCircleCollisions(f.x, f.z, 1.0, colliders);
+    assert.equal(res.collided, false, `Fare destination ${f.label} collides with static object`);
+  }
+  for (const v of INITIAL_VEHICLES) {
+    checkInBounds(`Vehicle ${v.id}`, v.x, v.z);
+    const res = resolveCircleCollisions(v.x, v.z, 0.8, colliders);
+    assert.equal(res.collided, false, `Vehicle spawn ${v.id} collides with static object`);
+  }
+  TRAFFIC_ROUTES.forEach((route, ri) => {
+    route.forEach((wp, wi) => {
+      checkInBounds(`Route ${ri} wp ${wi}`, wp.x, wp.z);
+    });
+  });
+});
 
 test('player spawn position is completely unobstructed by any static building collider', () => {
   const player = createInitialPlayerState();
@@ -59,19 +131,16 @@ test('vehicle kinematics accelerate, steer, brake, and take collision damage at 
     damagedSmoke: false,
   };
 
-  // Accelerate north for 1 second
   for (let i = 0; i < 20; i++) {
     stepVehicleKinematics(cng, { throttle: 1, steer: 0, handbrake: false }, 0.05, colliders);
   }
   assert.ok(cng.speed > 10, `Expected CNG speed > 10 m/s, got ${cng.speed}`);
   assert.ok(cng.z < 30, `Expected CNG to move north (z < 30), got ${cng.z}`);
 
-  // Steer left while moving
   const headingBefore = cng.heading;
   stepVehicleKinematics(cng, { throttle: 1, steer: 1, handbrake: false }, 0.05, colliders);
   assert.notEqual(cng.heading, headingBefore);
 
-  // Crash into monument at high speed
   cng.x = 0;
   cng.z = 5.5;
   cng.heading = Math.PI;
@@ -91,7 +160,6 @@ test('combat damage absorbs via armor first and allows player defeat (hp reaches
   assert.ok(player.armor < 50, 'Armor should absorb part of incoming damage');
   assert.ok(player.hp < 100 && player.hp > 60, 'HP should drop by reduced post-armor amount');
 
-  // Heavy lethal damage must drop HP to exactly 0 (never clamped to 1)
   applyPlayerDamage(player, 250);
   assert.equal(player.hp, 0);
   assert.equal(player.armor, 0);
@@ -105,7 +173,6 @@ test('wanted level escalates up to 5 stars and cools down when evading police', 
   addWantedHeat(player, 150);
   assert.equal(player.wantedLevel, 5);
 
-  // When police are far away, cooldown expires and clears stars
   player.wantedCooldown = 1.0;
   tickWantedCooldown(player, false, 1.5);
   assert.equal(player.wantedLevel, 0);
@@ -122,17 +189,14 @@ test('shop, garage, and wardrobe economy validate Taka balance and mutate state'
   assert.equal(player.hp, player.maxHp);
   assert.equal(player.money, 850);
 
-  // Try buying expensive shotgun without enough funds
   const tooExpensive = buyShopItem(player, 'shotgun');
   assert.equal(tooExpensive.ok, false);
   assert.equal(player.unlockedWeapons.includes('shotgun'), false);
 
-  // Buy outfit
   const outfit = equipOrBuyOutfit(player, 'panjabi');
   assert.equal(outfit.ok, true);
   assert.equal(player.outfit, 'panjabi');
 
-  // Garage clear wanted heat
   addWantedHeat(player, 40);
   player.money = 500;
   const clear = applyGarageService(player, null, 'clear_heat');
@@ -141,11 +205,16 @@ test('shop, garage, and wardrobe economy validate Taka balance and mutate state'
   assert.equal(player.money, 200);
 });
 
-test('district lookup and time formatting work accurately', () => {
+test('all 9 Dhaka districts are detected accurately and time formatting works', () => {
   assert.equal(getDistrictAt(0, 0), 'shapla_crossing');
   assert.equal(getDistrictAt(35, -35), 'gulshan');
   assert.equal(getDistrictAt(-35, 35), 'old_dhaka');
-  assert.equal(getDistrictAt(0, 72), 'sadarghat');
+  assert.equal(getDistrictAt(-40, -35), 'kawran_flyover');
+  assert.equal(getDistrictAt(0, 184), 'sadarghat');
+  assert.equal(getDistrictAt(140, 40), 'motijheel');
+  assert.equal(getDistrictAt(-180, -20), 'dhanmondi');
+  assert.equal(getDistrictAt(40, -190), 'uttara_north');
+  assert.equal(getDistrictAt(-120, -190), 'mirpur_market');
   assert.equal(formatDhakaTime(16.5), '4:30 PM');
   assert.equal(formatDhakaTime(0.25), '12:15 AM');
 });

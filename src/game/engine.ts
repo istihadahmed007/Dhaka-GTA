@@ -5,12 +5,15 @@ import {
   ActiveDialogue,
   EnemyPolicy,
   GamePhase,
+  GraphicsQualityPreset,
   HudSnapshot,
   InteractModalKind,
+  LiveWeatherHudState,
   MinimapBlip,
   NpcState,
   OutfitId,
   PlayerState,
+  RegionalPlacesHudState,
   SideFareState,
   TimePreset,
   VehicleKind,
@@ -39,9 +42,15 @@ import {
   getDistrictAt,
   INITIAL_VEHICLES,
   POIS,
+  RIVER_Z_START,
+  ROAD_SEGMENTS,
   STORY_MISSIONS,
   TRAFFIC_ROUTES,
+  WORLD_HALF_SIZE,
 } from './worldData';
+import { getNearestStreetCorridor } from './dhakaGeoData';
+import { fetchDhakaLiveWeather, OPEN_METEO_CACHE_TTL_MS } from '../api/openMeteoClient';
+import { FALLBACK_DHAKA_REGIONAL_PLACES, fetchDhakaRegionalPlaces } from '../api/bdapisClient';
 import { createDhakaTextures, DhakaTextureSet } from './textures';
 import {
   createHumanoidRig,
@@ -49,10 +58,13 @@ import {
   HumanoidRig,
   setHumanoidOutfit,
   setHumanoidWeaponMesh,
+  upgradeHumanoidRigToGlb,
   VehicleRig,
 } from './models';
 import { buildDhakaWorld, WorldVisualHandles } from './worldBuilder';
 import { DhakaAudioEngine } from './audio';
+import { GraphicsQualityConfig, resolveGraphicsQualityConfig } from './graphicsQuality';
+import { DhakaCharacterGlbTemplate, loadDhakaCharacterTemplate } from './assetLoader';
 
 interface ParticleSlot {
   active: boolean;
@@ -74,16 +86,35 @@ const _vecC = new THREE.Vector3();
 const _mat4 = new THREE.Matrix4();
 const _quat = new THREE.Quaternion();
 const _scaleVec = new THREE.Vector3();
-const _skyDay = new THREE.Color(0x8bc6e8);
-const _skySunset = new THREE.Color(0xd97548);
-const _skyNight = new THREE.Color(0x0c1526);
-const _skyStorm = new THREE.Color(0x283544);
-const _tmpColor = new THREE.Color();
+const _zenithDay = new THREE.Color(0x2d74c4);
+const _horizonDay = new THREE.Color(0xc2dceb);
+const _zenithDawn = new THREE.Color(0x3b4d82);
+const _horizonDawn = new THREE.Color(0xf0a672);
+const _zenithSunset = new THREE.Color(0x2c3668);
+const _horizonSunset = new THREE.Color(0xe8834a);
+const _zenithNight = new THREE.Color(0x060b18);
+const _horizonNight = new THREE.Color(0x13223a);
+const _zenithStorm = new THREE.Color(0x1f2b38);
+const _horizonStorm = new THREE.Color(0x4a5968);
+const _sunColorDay = new THREE.Color(0xfff1d6);
+const _sunColorSunset = new THREE.Color(0xff9a4d);
+const _sunColorMoon = new THREE.Color(0x94b8e8);
+const _lightningColor = new THREE.Color(0xe0f2fe);
+const _tmpZenith = new THREE.Color();
+const _tmpHorizon = new THREE.Color();
+const _tmpSunColor = new THREE.Color();
+const _tmpRoadColor = new THREE.Color();
+const _dryRoadColor = new THREE.Color(0xffffff);
+const _wetRoadColor = new THREE.Color(0xaab6c4);
+const _sunDirVec = new THREE.Vector3();
 
 export class DhakaGameEngine {
   private container: HTMLElement;
   private onHudUpdate: (snap: HudSnapshot) => void;
   private isSoftwareGl: boolean;
+  private graphicsQuality: GraphicsQualityPreset;
+  private qualityConfig: GraphicsQualityConfig;
+  private characterTemplate: DhakaCharacterGlbTemplate | null = null;
 
   private renderer: THREE.WebGLRenderer;
   private scene: THREE.Scene;
@@ -97,9 +128,7 @@ export class DhakaGameEngine {
   private colliders: AabbCollider[];
   private player: PlayerState;
   private playerRig: HumanoidRig;
-  private playerWalkPhase = 0;
   private playerSquashY = 1;
-  private playerAttackAnim = 0;
   private playerHitFlash = 0;
 
   private vehicles: VehicleState[] = [];
@@ -143,6 +172,27 @@ export class DhakaGameEngine {
   private weather: WeatherMode = 'clear';
   private lightningTimer = 6;
   private lightningFlash = 0;
+
+  // Optional API-backed features (strictly opt-in; never block or freeze gameplay)
+  private liveWeatherState: LiveWeatherHudState = {
+    enabled: false,
+    status: 'idle',
+    conditionLabel: null,
+    conditionBangla: null,
+    temperatureC: null,
+    humidityPct: null,
+    windKmh: null,
+    fromCache: false,
+    error: null,
+  };
+  private liveWeatherLastCheckMs = 0;
+  private regionalPlacesState: RegionalPlacesHudState = {
+    enabled: false,
+    status: 'idle',
+    source: 'fallback',
+    places: [...FALLBACK_DHAKA_REGIONAL_PLACES],
+    error: null,
+  };
 
   // Camera & Juice
   private camYaw = 0; // 0 means looking north (-Z) behind player
@@ -188,6 +238,13 @@ export class DhakaGameEngine {
       }
     })();
 
+    this.graphicsQuality = this.isSoftwareGl ? 'low' : 'high';
+    this.qualityConfig = resolveGraphicsQualityConfig(
+      this.graphicsQuality,
+      this.isSoftwareGl,
+      window.devicePixelRatio || 1,
+    );
+
     this.renderer = new THREE.WebGLRenderer({
       antialias: !this.isSoftwareGl,
       powerPreference: 'high-performance',
@@ -195,8 +252,8 @@ export class DhakaGameEngine {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.12;
-    this.renderer.setPixelRatio(this.isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
-    this.renderer.shadowMap.enabled = !this.isSoftwareGl;
+    this.renderer.setPixelRatio(this.qualityConfig.pixelRatio);
+    this.renderer.shadowMap.enabled = this.qualityConfig.shadowsEnabled;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     const width = container.clientWidth || window.innerWidth;
@@ -207,34 +264,32 @@ export class DhakaGameEngine {
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x9bc7e2);
-    this.scene.fog = new THREE.FogExp2(0xb8c9d4, 0.0068);
+    this.scene.fog = new THREE.FogExp2(0xb8c9d4, 0.0044);
 
     // Mandatory studio environment reflection map for PBR metals & car clearcoats
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
     pmrem.dispose();
 
-    this.camera = new THREE.PerspectiveCamera(58, width / height, 0.25, 420);
+    this.camera = new THREE.PerspectiveCamera(58, width / height, 0.25, 780);
 
-    // Warm/Cool lighting rig (single shadow caster with tight frustum)
+    // Warm/Cool lighting rig (single shadow caster with balanced frustum)
     this.hemiLight = new THREE.HemisphereLight(0xaad4f5, 0x5d4b3c, 0.78);
     this.scene.add(this.hemiLight);
 
     this.sunLight = new THREE.DirectionalLight(0xffe1b8, 2.2);
-    this.sunLight.position.set(48, 72, 34);
-    if (!this.isSoftwareGl) {
-      this.sunLight.castShadow = true;
-      this.sunLight.shadow.mapSize.set(1024, 1024);
-      const d = 68;
-      this.sunLight.shadow.camera.left = -d;
-      this.sunLight.shadow.camera.right = d;
-      this.sunLight.shadow.camera.top = d;
-      this.sunLight.shadow.camera.bottom = -d;
-      this.sunLight.shadow.camera.near = 5;
-      this.sunLight.shadow.camera.far = 190;
-      this.sunLight.shadow.bias = -0.0005;
-      this.sunLight.shadow.normalBias = 0.025;
-    }
+    this.sunLight.position.set(54, 78, 38);
+    this.sunLight.castShadow = this.qualityConfig.shadowsEnabled;
+    this.sunLight.shadow.mapSize.set(this.qualityConfig.shadowMapSize, this.qualityConfig.shadowMapSize);
+    const d = 84;
+    this.sunLight.shadow.camera.left = -d;
+    this.sunLight.shadow.camera.right = d;
+    this.sunLight.shadow.camera.top = d;
+    this.sunLight.shadow.camera.bottom = -d;
+    this.sunLight.shadow.camera.near = 5;
+    this.sunLight.shadow.camera.far = 225;
+    this.sunLight.shadow.bias = -0.0005;
+    this.sunLight.shadow.normalBias = 0.025;
     this.scene.add(this.sunLight);
     this.scene.add(this.sunLight.target);
 
@@ -242,6 +297,7 @@ export class DhakaGameEngine {
     this.textures = createDhakaTextures(this.renderer.capabilities.getMaxAnisotropy());
     this.colliders = buildStaticColliders();
     this.world = buildDhakaWorld(this.scene, this.textures, !this.isSoftwareGl);
+    this.applyQualityHandles();
 
     // Pooled particle InstancedMesh (180 slots)
     const pGeo = new THREE.BoxGeometry(0.18, 0.18, 0.18);
@@ -268,9 +324,12 @@ export class DhakaGameEngine {
     }
     this.particleMesh.instanceMatrix.needsUpdate = true;
 
-    // Player setup
+    // Player setup (instant sculpted procedural rig, smoothly upgraded to rigged GLB once loaded)
     this.player = createInitialPlayerState();
-    this.playerRig = createHumanoidRig(0x26466d, 0x1e2530, 0xe6a135, this.textures, { isPlayer: true });
+    this.playerRig = createHumanoidRig(0x26466d, 0x1e2530, 0xe6a135, this.textures, {
+      isPlayer: true,
+      castShadow: !this.isSoftwareGl,
+    });
     setHumanoidOutfit(this.playerRig, this.player.outfit);
     setHumanoidWeaponMesh(this.playerRig, this.player.weapon);
     this.playerRig.group.position.set(this.player.x, 0, this.player.z);
@@ -279,6 +338,7 @@ export class DhakaGameEngine {
 
     this.spawnInitialEntities();
     this.applyEnvironmentLighting(0);
+    void this.loadCharacterGlbAsync();
 
     if (!this.isSoftwareGl) {
       this.renderer.compile(this.scene, this.camera);
@@ -307,7 +367,10 @@ export class DhakaGameEngine {
     this.vehicleRigs.clear();
     this.vehicles = [];
 
-    this.npcRigs.forEach((rig) => this.scene.remove(rig.group));
+    this.npcRigs.forEach((rig) => {
+      rig.animator.disposeMixer();
+      this.scene.remove(rig.group);
+    });
     this.npcRigs.clear();
     this.npcs = [];
 
@@ -365,14 +428,20 @@ export class DhakaGameEngine {
       hp: 200,
     });
 
-    // Spawn 18 Dhaka pedestrians across sidewalks in vibrant Bangladeshi attire
+    // Spawn 32 Dhaka pedestrians across inner & expanded district sidewalks
     const pedPalette = [0xc0392b, 0x16a085, 0xd4a017, 0x2980b9, 0x8e44ad, 0xe67e22, 0xf1f5f9, 0x1f6f54];
     const sidewalkSpots: Array<[number, number]> = [
+      // Core Shapla / Old Dhaka / Gulshan / Kawran
       [-12, 26], [12, 32], [-12, 52], [12, 48],
       [-20, 12], [20, 12], [-40, 12], [40, 12],
       [-12, -18], [12, -18], [-12, -38], [12, -38],
-      [-32, -12], [32, -12], [-22, 68], [22, 68],
+      [-32, -12], [32, -12], [-22, 74], [22, 74],
       [-52, 28], [52, -28],
+      // Expanded districts: Motijheel, Old Dhaka South, Sadarghat, Dhanmondi, Mirpur, Banani North
+      [114, 24], [156, 52], [116, 114], [172, 114],
+      [-114, 92], [-88, 132], [-156, 116], [-12, 174],
+      [28, 174], [-156, -14], [-156, -54], [-116, -120],
+      [116, -120], [52, -172],
     ];
     sidewalkSpots.forEach(([px, pz], idx) => {
       this.spawnNpc({
@@ -387,27 +456,25 @@ export class DhakaGameEngine {
       });
     });
 
-    // Spawn 2 DMP Patrol Officers standing watch near DMP Thana
-    this.spawnNpc({
-      role: 'police',
-      policy: 'chaser',
-      x: 28,
-      z: 24,
-      shirtColor: 0x1e3a8a,
-      pantsColor: 0x172554,
-      accentColor: 0xfacc15,
-      hp: 85,
-    });
-    this.spawnNpc({
-      role: 'police',
-      policy: 'ranged',
-      x: 38,
-      z: 30,
-      shirtColor: 0x1e3a8a,
-      pantsColor: 0x172554,
-      accentColor: 0xfacc15,
-      hp: 85,
-    });
+    // Spawn 4 DMP Patrol Officers standing watch across Central Thana, Motijheel & Sadarghat
+    const policePosts: Array<{ x: number; z: number; policy: EnemyPolicy }> = [
+      { x: 28, z: 24, policy: 'chaser' },
+      { x: 38, z: 30, policy: 'ranged' },
+      { x: 132, z: 12, policy: 'ranged' },
+      { x: -16, z: 174, policy: 'chaser' },
+    ];
+    for (const post of policePosts) {
+      this.spawnNpc({
+        role: 'police',
+        policy: post.policy,
+        x: post.x,
+        z: post.z,
+        shirtColor: 0x1e3a8a,
+        pantsColor: 0x172554,
+        accentColor: 0xfacc15,
+        hp: 85,
+      });
+    }
   }
 
   private spawnNpc(opts: {
@@ -455,7 +522,11 @@ export class DhakaGameEngine {
     const rig = createHumanoidRig(opts.shirtColor, opts.pantsColor, opts.accentColor, this.textures, {
       isPolice: opts.role === 'police',
       isBoss: opts.role === 'boss',
+      castShadow: !this.isSoftwareGl,
     });
+    if (this.characterTemplate) {
+      upgradeHumanoidRigToGlb(rig, this.characterTemplate, this.textures, !this.isSoftwareGl);
+    }
     if (opts.role === 'police' || opts.role === 'syndicate' || opts.role === 'boss') {
       setHumanoidWeaponMesh(rig, opts.policy === 'ranged' ? 'pistol' : opts.role === 'boss' ? 'shotgun' : 'fists');
     }
@@ -464,6 +535,30 @@ export class DhakaGameEngine {
     this.scene.add(rig.group);
     this.npcRigs.set(id, rig);
     return npc;
+  }
+
+  private async loadCharacterGlbAsync(): Promise<void> {
+    const template = await loadDhakaCharacterTemplate('/models/dhaka_character.glb');
+    if (this.disposed || !template) return;
+    this.characterTemplate = template;
+
+    // Smoothly upgrade player & active NPCs to skinned GLB characters in-place
+    upgradeHumanoidRigToGlb(this.playerRig, template, this.textures, !this.isSoftwareGl);
+    setHumanoidOutfit(this.playerRig, this.player.outfit);
+    setHumanoidWeaponMesh(this.playerRig, this.player.weapon);
+
+    this.npcRigs.forEach((rig) => {
+      upgradeHumanoidRigToGlb(rig, template, this.textures, !this.isSoftwareGl);
+    });
+    this.emitHud();
+  }
+
+  private applyQualityHandles(): void {
+    const cfg = this.qualityConfig;
+    this.world.haloInst.visible = cfg.lampHalosEnabled;
+    this.world.poolInst.visible = cfg.lampHalosEnabled;
+    const rainCount = Math.max(120, Math.round(this.world.rainMaxCount * cfg.rainDensityScale));
+    this.world.rainPoints.geometry.setDrawRange(0, rainCount);
   }
 
   // === PUBLIC API FOR REACT SHELL ===
@@ -597,6 +692,10 @@ export class DhakaGameEngine {
   }
 
   public setWeather(mode: WeatherMode): void {
+    // Manual weather selection always works and cleanly overrides live weather sync
+    if (this.liveWeatherState.enabled) {
+      this.liveWeatherState.enabled = false;
+    }
     this.weather = mode;
     this.applyEnvironmentLighting(0);
     this.showToast(`Weather: ${mode === 'clear' ? 'Tropical Sun' : mode === 'monsoon' ? 'Monsoon Rain' : 'Dhaka Thunderstorm'}`);
@@ -607,6 +706,114 @@ export class DhakaGameEngine {
     if (this.weather === 'clear') this.setWeather('monsoon');
     else if (this.weather === 'monsoon') this.setWeather('storm');
     else this.setWeather('clear');
+  }
+
+  public setGraphicsQuality(preset: GraphicsQualityPreset): void {
+    this.graphicsQuality = preset;
+    this.qualityConfig = resolveGraphicsQualityConfig(
+      preset,
+      this.isSoftwareGl,
+      window.devicePixelRatio || 1,
+    );
+    const cfg = this.qualityConfig;
+    this.renderer.setPixelRatio(cfg.pixelRatio);
+    this.renderer.shadowMap.enabled = cfg.shadowsEnabled;
+    this.sunLight.castShadow = cfg.shadowsEnabled;
+    if (
+      this.sunLight.shadow.mapSize.x !== cfg.shadowMapSize ||
+      this.sunLight.shadow.mapSize.y !== cfg.shadowMapSize
+    ) {
+      this.sunLight.shadow.mapSize.set(cfg.shadowMapSize, cfg.shadowMapSize);
+      if (this.sunLight.shadow.map) {
+        this.sunLight.shadow.map.dispose();
+        this.sunLight.shadow.map = null;
+      }
+    }
+    this.applyQualityHandles();
+    this.applyEnvironmentLighting(0);
+    this.showToast(`Graphics Quality: ${preset.toUpperCase()}`);
+    this.emitHud();
+  }
+
+  public setLiveWeatherEnabled(enabled: boolean): void {
+    this.liveWeatherState.enabled = enabled;
+    if (!enabled) {
+      this.liveWeatherState.status = 'idle';
+      this.liveWeatherState.error = null;
+      this.showToast('Switched to Manual Dhaka Weather');
+      this.emitHud();
+      return;
+    }
+    void this.syncLiveWeather(false);
+  }
+
+  public refreshLiveWeather(): void {
+    this.liveWeatherState.enabled = true;
+    void this.syncLiveWeather(true);
+  }
+
+  private async syncLiveWeather(forceRefresh: boolean): Promise<void> {
+    this.liveWeatherState.status = 'loading';
+    this.liveWeatherState.error = null;
+    this.liveWeatherLastCheckMs = Date.now();
+    this.emitHud();
+
+    const result = await fetchDhakaLiveWeather({ forceRefresh });
+    if (this.disposed || !this.liveWeatherState.enabled) return;
+
+    if (result.ok && result.reading) {
+      const r = result.reading;
+      this.liveWeatherState = {
+        enabled: true,
+        status: 'live',
+        conditionLabel: r.conditionLabel,
+        conditionBangla: r.conditionBangla,
+        temperatureC: r.temperatureC,
+        humidityPct: r.humidityPct,
+        windKmh: r.windKmh,
+        fromCache: r.fromCache,
+        error: null,
+      };
+      this.weather = r.mappedMode;
+      this.applyEnvironmentLighting(0);
+      this.showToast(`Live Dhaka Weather: ${r.temperatureC}°C · ${r.conditionLabel}`);
+    } else {
+      this.liveWeatherState = {
+        ...this.liveWeatherState,
+        enabled: true,
+        status: 'error',
+        error: result.error ?? 'Could not fetch Dhaka weather — manual mode still works',
+      };
+      this.showToast('Live weather unavailable — keeping current weather');
+    }
+    this.emitHud();
+  }
+
+  public setRegionalPlacesEnabled(enabled: boolean): void {
+    this.regionalPlacesState.enabled = enabled;
+    if (!enabled) {
+      this.emitHud();
+      return;
+    }
+    void this.loadRegionalPlaces();
+  }
+
+  private async loadRegionalPlaces(): Promise<void> {
+    this.regionalPlacesState.status = 'loading';
+    this.regionalPlacesState.error = null;
+    this.emitHud();
+
+    const result = await fetchDhakaRegionalPlaces();
+    if (this.disposed) return;
+
+    this.regionalPlacesState = {
+      enabled: this.regionalPlacesState.enabled,
+      status: result.ok ? 'ready' : 'error',
+      source: result.source,
+      places: result.places,
+      error: result.error,
+    };
+    this.emitHud();
   }
 
   public selectWeapon(weapon: WeaponId): void {
@@ -664,18 +871,19 @@ export class DhakaGameEngine {
       this.emitHud();
       return;
     }
-    // Pick a destination at least 45m away
-    const candidates = FARE_DESTINATIONS.filter((d) => Math.hypot(d.x - this.player.x, d.z - this.player.z) > 40);
+    // Pick a destination at least 60m away across the expanded city
+    const candidates = FARE_DESTINATIONS.filter((d) => Math.hypot(d.x - this.player.x, d.z - this.player.z) > 60);
     const pick = candidates[Math.floor(Math.random() * candidates.length)] ?? FARE_DESTINATIONS[0];
-    const names = ['Karim Uncle', 'Farhana', 'Shafiq', 'Mina Apu', 'Imran'];
+    const dist = Math.hypot(pick.x - this.player.x, pick.z - this.player.z);
+    const names = ['Karim Uncle', 'Farhana', 'Shafiq', 'Mina Apu', 'Imran', 'Tanvir', 'Nusrat'];
     this.fare = {
       active: true,
       passengerName: names[Math.floor(Math.random() * names.length)],
       destX: pick.x,
       destZ: pick.z,
       destLabel: pick.label,
-      timer: 42,
-      reward: 380 + Math.round(Math.hypot(pick.x - this.player.x, pick.z - this.player.z) * 3),
+      timer: Math.max(36, Math.round(dist * 0.42 + 18)),
+      reward: 360 + Math.round(dist * 3.5),
     };
     this.audio.playChime(false);
     this.showToast(`Passenger ${this.fare.passengerName}: Drop at ${pick.label}!`);
@@ -850,6 +1058,7 @@ export class DhakaGameEngine {
     if (this.phase === 'title') {
       this.titleAngle += dt * 0.14;
       this.updateTraffic(dt * 0.8);
+      this.playerRig.animator.update(dt, { speed: 0, isGrounded: true, weapon: this.player.weapon });
       this.updateTitleCamera();
       this.keysJustPressed.clear();
       this.mouseJustPressed = false;
@@ -895,6 +1104,15 @@ export class DhakaGameEngine {
       // Gentle real-time Dhaka day/night cycle (1 full day ~ 8 minutes)
       this.timeOfDay = (this.timeOfDay + simDt * 0.05) % 24;
       this.applyEnvironmentLighting(simDt);
+
+      // Infrequent 30-minute Open-Meteo refresh ONLY when explicitly enabled
+      if (
+        this.liveWeatherState.enabled &&
+        this.liveWeatherState.status !== 'loading' &&
+        Date.now() - this.liveWeatherLastCheckMs >= OPEN_METEO_CACHE_TTL_MS
+      ) {
+        void this.syncLiveWeather(false);
+      }
 
       this.handleEdgeInputs();
       if (this.player.vehicleId) {
@@ -1055,22 +1273,22 @@ export class DhakaGameEngine {
   private tryInteractPoi(): void {
     for (const poi of POIS) {
       if (Math.hypot(poi.x - this.player.x, poi.z - this.player.z) <= poi.radius + 2.5) {
-        if (poi.id === 'garage') {
+        if (poi.kind === 'garage') {
           this.modal = 'garage';
           this.clearInputs();
           this.emitHud();
           return;
         }
-        if (poi.id === 'shop') {
+        if (poi.kind === 'shop') {
           this.modal = 'shop';
           this.clearInputs();
           this.emitHud();
           return;
         }
-        if (poi.id === 'tea_stall') {
+        if (poi.kind === 'tea_stall') {
           this.player.hp = Math.min(this.player.maxHp, this.player.hp + 25);
           this.audio.playChime(false);
-          this.showToast('Hot Masala Cha from Rafiq Bhai (+25 HP)');
+          this.showToast(`Hot Masala Cha at ${poi.name} (+25 HP)`);
           this.emitHud();
           return;
         }
@@ -1204,32 +1422,28 @@ export class DhakaGameEngine {
       this.performPlayerAttack(spec.id);
     }
 
-    // Animate articulated player rig synced to distance traveled
+    // Animate rigged GLB (or sculpted procedural fallback) player via smooth CharacterAnimator
     const horizSpeed = Math.hypot(this.player.vx, this.player.vz);
-    this.playerWalkPhase += horizSpeed * dt * 2.1;
     this.playerSquashY += (1 - this.playerSquashY) * (1 - Math.exp(-12 * dt));
-    if (this.playerAttackAnim > 0) this.playerAttackAnim = Math.max(0, this.playerAttackAnim - dt * 5);
     if (this.playerHitFlash > 0) {
       this.playerHitFlash -= dt;
       this.playerRig.torsoMat.emissive.setHex(this.playerHitFlash > 0 ? 0xff4444 : 0x000000);
     }
 
     const invSq = 1 / Math.sqrt(this.playerSquashY);
-    this.playerRig.bodyRoot.scale.set(invSq, this.playerSquashY, invSq);
+    const baseS = this.playerRig.baseScale;
+    this.playerRig.bodyRoot.scale.set(invSq * baseS, this.playerSquashY * baseS, invSq * baseS);
     this.playerRig.group.position.set(this.player.x, this.player.y, this.player.z);
     this.playerRig.group.rotation.y = this.player.heading;
 
-    const swing = horizSpeed > 0.3 ? Math.sin(this.playerWalkPhase) * Math.min(0.85, horizSpeed * 0.1) : 0;
-    this.playerRig.leftLeg.rotation.x = swing;
-    this.playerRig.rightLeg.rotation.x = -swing;
-    this.playerRig.leftArm.rotation.x = -swing * 0.85;
-    if (this.playerAttackAnim > 0) {
-      this.playerRig.rightArm.rotation.x = -Math.PI * 0.48 - this.playerAttackAnim * 0.45;
-    } else if (this.player.weapon !== 'fists') {
-      this.playerRig.rightArm.rotation.x = -Math.PI * 0.35;
-    } else {
-      this.playerRig.rightArm.rotation.x = swing * 0.85;
-    }
+    this.playerRig.animator.update(dt, {
+      speed: horizSpeed,
+      maxWalkSpeed: 5.8,
+      maxRunSpeed: 9.6,
+      isGrounded: this.player.grounded,
+      weapon: this.player.weapon,
+      isAiming: this.player.weapon !== 'fists',
+    });
   }
 
   private startReload(): void {
@@ -1268,7 +1482,7 @@ export class DhakaGameEngine {
     }
 
     this.player.attackCooldown = spec.cooldown;
-    this.playerAttackAnim = 1;
+    this.playerRig.animator.triggerAttack();
     this.audio.playWeapon(weaponId);
 
     // Face camera forward direction when firing a gun
@@ -1336,6 +1550,7 @@ export class DhakaGameEngine {
     npc.hitFlashTimer = 0.07;
     npc.vx += knockX * (heavy ? 6.5 : 3.2);
     npc.vz += knockZ * (heavy ? 6.5 : 3.2);
+    this.npcRigs.get(npc.id)?.animator.triggerHit();
     this.spawnBurst(npc.x, 1.3, npc.z, 0xf97316, heavy ? 12 : 6, 4.5);
     this.audio.playImpact(heavy);
 
@@ -1590,14 +1805,13 @@ export class DhakaGameEngine {
         rig.torsoMat.emissive.setHex(npc.hitFlashTimer > 0 ? 0xffffff : 0x000000);
       }
 
-      // KO topple dissolve animation
+      // KO topple / rigged fall animation
       if (npc.state === 'ko') {
         npc.koTimer -= dt;
         rig.telegraphRing.visible = false;
-        const p = 1 - Math.max(0, npc.koTimer / 0.48);
-        rig.bodyRoot.rotation.x = p * (Math.PI / 2);
-        rig.bodyRoot.position.y = -p * 0.45;
+        rig.animator.update(dt, { speed: 0, isKo: true });
         if (npc.koTimer <= 0) {
+          rig.animator.disposeMixer();
           this.scene.remove(rig.group);
           this.npcRigs.delete(npc.id);
           this.npcs.splice(i, 1);
@@ -1616,11 +1830,14 @@ export class DhakaGameEngine {
         (npc.role === 'police' && this.player.wantedLevel > 0);
 
       if (npc.role === 'ally') {
-        // Face player when nearby
+        // Face player when nearby and breathe gently in Idle clip
         if (distP < 12) {
           npc.heading = Math.atan2(dxP, dzP);
         }
         rig.group.rotation.y = npc.heading;
+        if (distP < this.qualityConfig.npcAnimationMaxDist) {
+          rig.animator.update(dt, { speed: 0, isGrounded: true });
+        }
         continue;
       }
 
@@ -1635,9 +1852,9 @@ export class DhakaGameEngine {
           rig.telegraphRing.visible = true;
           const pulse = 0.85 + Math.sin(this.playTimeSec * 24) * 0.18;
           rig.telegraphRing.scale.setScalar(pulse);
-          rig.rightArm.rotation.x = -Math.PI * 0.65;
           if (npc.stateTimer <= 0) {
             rig.telegraphRing.visible = false;
+            rig.animator.triggerAttack();
             this.executeEnemyAttack(npc, distP, dxP, dzP);
             npc.state = 'chase';
             npc.attackCooldown = npc.role === 'boss' ? 1.1 : 1.55;
@@ -1716,8 +1933,11 @@ export class DhakaGameEngine {
         const tz = npc.targetZ - npc.z;
         const td = Math.hypot(tx, tz);
         if (td < 1.5 || npc.stateTimer <= 0) {
-          npc.targetX = THREE.MathUtils.clamp(npc.x + (Math.random() - 0.5) * 24, -75, 75);
-          npc.targetZ = THREE.MathUtils.clamp(npc.z + (Math.random() - 0.5) * 24, -75, 72);
+          const boundX = WORLD_HALF_SIZE - 25;
+          const boundZMin = -(WORLD_HALF_SIZE - 25);
+          const boundZMax = RIVER_Z_START - 12;
+          npc.targetX = THREE.MathUtils.clamp(npc.x + (Math.random() - 0.5) * 32, -boundX, boundX);
+          npc.targetZ = THREE.MathUtils.clamp(npc.z + (Math.random() - 0.5) * 32, boundZMin, boundZMax);
           npc.stateTimer = 4 + Math.random() * 4;
         } else {
           npc.stateTimer -= dt;
@@ -1733,13 +1953,17 @@ export class DhakaGameEngine {
 
       rig.group.position.set(npc.x, 0, npc.z);
       rig.group.rotation.y = npc.heading;
-      const spd = Math.hypot(npc.vx, npc.vz);
-      const gait = spd > 0.2 ? Math.sin(this.playTimeSec * 7 + i) * 0.65 : 0;
-      rig.leftLeg.rotation.x = gait;
-      rig.rightLeg.rotation.x = -gait;
-      rig.leftArm.rotation.x = -gait * 0.7;
-      if (npc.state !== 'windup') {
-        rig.rightArm.rotation.x = npc.policy === 'ranged' && isHostile ? -Math.PI * 0.38 : gait * 0.7;
+      if (distP < this.qualityConfig.npcAnimationMaxDist) {
+        const spd = Math.hypot(npc.vx, npc.vz);
+        rig.animator.update(dt, {
+          speed: spd,
+          maxWalkSpeed: 3.4,
+          maxRunSpeed: 5.8,
+          isGrounded: true,
+          isWindup: npc.state === 'windup',
+          isAiming: npc.policy === 'ranged' && isHostile,
+          weapon: npc.policy === 'ranged' ? 'pistol' : npc.role === 'boss' ? 'shotgun' : 'fists',
+        });
       }
     }
   }
@@ -1775,6 +1999,9 @@ export class DhakaGameEngine {
       applyPlayerDamage(this.player, rawDamage);
     }
     this.playerHitFlash = 0.14;
+    if (!this.player.vehicleId) {
+      this.playerRig.animator.triggerHit();
+    }
     this.trauma = Math.min(1, this.trauma + 0.32);
     this.spawnBurst(this.player.x, 1.3, this.player.z, 0xef4444, 8, 4);
     this.audio.playImpact(false);
@@ -1798,8 +2025,9 @@ export class DhakaGameEngine {
     if (activePolice < desiredPolice && this.policeSpawnTimer <= 0) {
       this.policeSpawnTimer = 5.5;
       const angle = Math.random() * Math.PI * 2;
-      const sx = THREE.MathUtils.clamp(this.player.x + Math.cos(angle) * 28, -72, 72);
-      const sz = THREE.MathUtils.clamp(this.player.z + Math.sin(angle) * 28, -72, 68);
+      const policeBoundX = WORLD_HALF_SIZE - 30;
+      const sx = THREE.MathUtils.clamp(this.player.x + Math.cos(angle) * 32, -policeBoundX, policeBoundX);
+      const sz = THREE.MathUtils.clamp(this.player.z + Math.sin(angle) * 32, -policeBoundX, RIVER_Z_START - 12);
       const safe = resolveCircleCollisions(sx, sz, 0.8, this.colliders);
       const policies: EnemyPolicy[] = ['chaser', 'ranged', 'flanker'];
       this.spawnNpc({
@@ -1978,37 +2206,64 @@ export class DhakaGameEngine {
     const sunElev = Math.sin(dayPhase);
     const isNight = sunElev < -0.05;
 
+    // Snap shadow camera anchor to 2m grid to prevent directional shadow shimmer while moving
+    const snapX = Math.round(this.player.x / 2) * 2;
+    const snapZ = Math.round(this.player.z / 2) * 2;
+
     if (!isNight) {
       const sunAngle = dayPhase;
-      this.sunLight.position.set(
-        this.player.x + Math.cos(sunAngle) * 75,
-        Math.max(14, Math.sin(sunAngle) * 85),
-        this.player.z + 32,
-      );
-      this.sunLight.target.position.set(this.player.x, 0, this.player.z);
+      const sx = Math.cos(sunAngle) * 78;
+      const sy = Math.max(14, Math.sin(sunAngle) * 86);
+      const sz = 32;
+      this.sunLight.position.set(snapX + sx, sy, snapZ + sz);
+      this.sunLight.target.position.set(snapX, 0, snapZ);
+      _sunDirVec.set(sx, Math.max(4, Math.sin(sunAngle) * 86), sz).normalize();
     } else {
       // Cool moonlight from high above
-      this.sunLight.position.set(this.player.x - 40, 68, this.player.z - 25);
-      this.sunLight.target.position.set(this.player.x, 0, this.player.z);
+      this.sunLight.position.set(snapX - 40, 68, snapZ - 25);
+      this.sunLight.target.position.set(snapX, 0, snapZ);
+      _sunDirVec.set(-40, 68, -25).normalize();
     }
 
-    // Blend sky & fog palette smoothly
-    if (h >= 5 && h < 8) {
-      _tmpColor.lerpColors(_skyNight, _skySunset, (h - 5) / 3);
-    } else if (h >= 8 && h < 16) {
-      _tmpColor.lerpColors(_skySunset, _skyDay, Math.min(1, (h - 8) / 2.5));
-    } else if (h >= 16 && h < 19) {
-      _tmpColor.lerpColors(_skyDay, _skySunset, (h - 16) / 2.4);
-    } else if (h >= 19 && h < 21) {
-      _tmpColor.lerpColors(_skySunset, _skyNight, (h - 19) / 2);
+    // Blend Sky Dome zenith & horizon palettes smoothly across Dawn, Day, Sunset, and Night
+    if (h >= 5 && h < 7.8) {
+      const t = (h - 5) / 2.8;
+      _tmpZenith.lerpColors(_zenithNight, _zenithDawn, t);
+      _tmpHorizon.lerpColors(_horizonNight, _horizonDawn, t);
+      _tmpSunColor.lerpColors(_sunColorMoon, _sunColorSunset, t);
+    } else if (h >= 7.8 && h < 10.5) {
+      const t = (h - 7.8) / 2.7;
+      _tmpZenith.lerpColors(_zenithDawn, _zenithDay, t);
+      _tmpHorizon.lerpColors(_horizonDawn, _horizonDay, t);
+      _tmpSunColor.lerpColors(_sunColorSunset, _sunColorDay, t);
+    } else if (h >= 10.5 && h < 15.8) {
+      _tmpZenith.copy(_zenithDay);
+      _tmpHorizon.copy(_horizonDay);
+      _tmpSunColor.copy(_sunColorDay);
+    } else if (h >= 15.8 && h < 18.6) {
+      const t = (h - 15.8) / 2.8;
+      _tmpZenith.lerpColors(_zenithDay, _zenithSunset, t);
+      _tmpHorizon.lerpColors(_horizonDay, _horizonSunset, t);
+      _tmpSunColor.lerpColors(_sunColorDay, _sunColorSunset, t);
+    } else if (h >= 18.6 && h < 20.8) {
+      const t = (h - 18.6) / 2.2;
+      _tmpZenith.lerpColors(_zenithSunset, _zenithNight, t);
+      _tmpHorizon.lerpColors(_horizonSunset, _horizonNight, t);
+      _tmpSunColor.lerpColors(_sunColorSunset, _sunColorMoon, t);
     } else {
-      _tmpColor.copy(_skyNight);
+      _tmpZenith.copy(_zenithNight);
+      _tmpHorizon.copy(_horizonNight);
+      _tmpSunColor.copy(_sunColorMoon);
     }
 
+    // Blend monsoon/storm cloud cover over zenith & horizon
+    const rainWetness = this.weather === 'storm' ? 1.0 : this.weather === 'monsoon' ? 0.78 : 0.0;
     if (this.weather === 'monsoon') {
-      _tmpColor.lerp(_skyStorm, 0.55);
+      _tmpZenith.lerp(_zenithStorm, 0.58);
+      _tmpHorizon.lerp(_horizonStorm, 0.56);
     } else if (this.weather === 'storm') {
-      _tmpColor.lerp(_skyStorm, 0.8);
+      _tmpZenith.lerp(_zenithStorm, 0.84);
+      _tmpHorizon.lerp(_horizonStorm, 0.82);
     }
 
     // Thunderstorm lightning flash
@@ -2021,40 +2276,102 @@ export class DhakaGameEngine {
       }
       if (this.lightningFlash > 0) {
         this.lightningFlash = Math.max(0, this.lightningFlash - dt * 4.5);
-        _tmpColor.lerp(new THREE.Color(0xdbeafe), this.lightningFlash * 0.65);
+        _tmpZenith.lerp(_lightningColor, this.lightningFlash * 0.55);
+        _tmpHorizon.lerp(_lightningColor, this.lightningFlash * 0.7);
       }
     } else {
       this.lightningFlash = 0;
     }
 
-    (this.scene.background as THREE.Color).copy(_tmpColor);
+    // Push unified atmospheric colors to Sky Dome shader, Scene background & Horizon Fog
+    const skyU = this.world.skyUniforms;
+    skyU.uZenithColor.value.copy(_tmpZenith);
+    skyU.uHorizonColor.value.copy(_tmpHorizon);
+    skyU.uSunColor.value.copy(_tmpSunColor);
+    skyU.uSunDir.value.copy(_sunDirVec);
+    skyU.uSunGlow.value = (isNight ? 0.28 : 1.0) * (1.0 - rainWetness * 0.72);
+
+    (this.scene.background as THREE.Color).copy(_tmpHorizon);
     if (this.scene.fog instanceof THREE.FogExp2) {
-      this.scene.fog.color.copy(_tmpColor);
-      this.scene.fog.density = this.weather === 'storm' ? 0.0115 : this.weather === 'monsoon' ? 0.0092 : 0.0064;
+      this.scene.fog.color.copy(_tmpHorizon);
+      this.scene.fog.density =
+        this.weather === 'storm' ? 0.0068 : this.weather === 'monsoon' ? 0.0052 : isNight ? 0.0038 : 0.0031;
     }
 
-    const nightFactor = isNight ? 1 : THREE.MathUtils.clamp(1 - sunElev * 3, 0, 1);
-    const stormDim = this.weather === 'storm' ? 0.62 : this.weather === 'monsoon' ? 0.78 : 1.0;
+    const nightFactor = isNight ? 1 : THREE.MathUtils.clamp(1 - sunElev * 2.8, 0, 1);
+    const stormDim = this.weather === 'storm' ? 0.58 : this.weather === 'monsoon' ? 0.76 : 1.0;
 
-    this.sunLight.intensity = (isNight ? 0.75 : 2.15 * Math.max(0.45, sunElev)) * stormDim + this.lightningFlash * 2.5;
-    this.sunLight.color.setHex(isNight ? 0x7da4d8 : sunElev < 0.35 ? 0xffb370 : 0xffe8c4);
-    this.hemiLight.intensity = (isNight ? 0.52 : 0.82) * stormDim;
+    // Dynamically scale PBR studio IBL environment intensity so Dhaka Night is truly dark & atmospheric!
+    const baseEnv = THREE.MathUtils.lerp(0.78, 0.16, nightFactor);
+    this.scene.environmentIntensity = (baseEnv + rainWetness * 0.08) * stormDim * this.qualityConfig.envIntensityMultiplier;
 
-    // Streetlights, neon signs & vehicle headlights glow brighter at night / monsoon
-    const glow = 0.35 + nightFactor * 1.9 + (this.weather !== 'clear' ? 0.45 : 0);
+    this.sunLight.intensity = (isNight ? 0.36 : 2.15 * Math.max(0.42, sunElev)) * stormDim + this.lightningFlash * 2.8;
+    this.sunLight.color.copy(_tmpSunColor);
+
+    // Dynamic Hemisphere bounce colors (warm golden-terracotta sunset, deep indigo night, tropical daylight)
+    this.hemiLight.color.copy(_tmpHorizon).lerp(_tmpZenith, 0.4);
+    this.hemiLight.groundColor.setHex(
+      isNight ? 0x111827 : sunElev < 0.32 ? 0x6e4a38 : rainWetness > 0 ? 0x2f3944 : 0x5d4f40,
+    );
+    this.hemiLight.intensity = THREE.MathUtils.lerp(0.84, 0.26, nightFactor) * stormDim;
+
+    // Balanced filmic exposure across bright daylight and moody night streets
+    this.renderer.toneMappingExposure = 1.06 - rainWetness * 0.04;
+
+    // Streetlights, neon signs, building windows & vehicle headlights respond to dusk/night/monsoon
+    const glow = 0.2 + nightFactor * 2.3 + rainWetness * 0.55;
     this.world.lampGlowMaterials.forEach((m) => (m.emissiveIntensity = glow));
-    this.world.signMaterials.forEach((m) => (m.emissiveIntensity = 0.4 + nightFactor * 0.95));
+    this.world.signMaterials.forEach((m) => (m.emissiveIntensity = 0.08 + nightFactor * 1.1 + rainWetness * 0.2));
+
+    const winGlow = 0.04 + nightFactor * 1.48 + rainWetness * 0.22;
+    this.world.nightWindowMaterials.forEach((m) => (m.emissiveIntensity = winGlow));
+
+    // Soft additive sodium streetlamp halos & warm road light pools (zero extra PointLights)
+    const lampAlpha = THREE.MathUtils.clamp(nightFactor * 0.95 + rainWetness * 0.28 - 0.14, 0, 0.95);
+    this.world.lampHaloMat.opacity = lampAlpha * 0.9;
+    this.world.lampPoolMat.opacity = lampAlpha * (0.42 + rainWetness * 0.26);
+
+    // Wet Dhaka monsoon road sheen (matte clean tarmac when dry; glossy wet sheen when raining!)
+    const isWet = rainWetness > 0.05;
+    const targetRoadRough = THREE.MathUtils.lerp(0.88, 0.22, rainWetness);
+    const targetRoadMetal = THREE.MathUtils.lerp(0.04, 0.38, rainWetness);
+    const targetEnvBoost = THREE.MathUtils.lerp(0.65, 2.2, rainWetness);
+    _tmpRoadColor.lerpColors(_dryRoadColor, _wetRoadColor, rainWetness);
+    for (const rMat of this.world.roadMaterials) {
+      const desiredRoughMap = isWet ? (rMat.userData.wetRoughnessMap as THREE.Texture | null) ?? null : null;
+      if (rMat.roughnessMap !== desiredRoughMap) {
+        rMat.roughnessMap = desiredRoughMap;
+        rMat.needsUpdate = true;
+      }
+      rMat.roughness = targetRoadRough;
+      rMat.metalness = targetRoadMetal;
+      rMat.envMapIntensity = targetEnvBoost;
+      if (rMat.map) {
+        rMat.color.copy(_tmpRoadColor);
+      }
+    }
+
     this.vehicleRigs.forEach((rig) => {
-      rig.headlights.forEach((hl) => (hl.emissiveIntensity = 0.45 + nightFactor * 1.8));
+      rig.headlights.forEach((hl) => (hl.emissiveIntensity = 0.45 + nightFactor * 2.1 + rainWetness * 0.5));
     });
   }
 
   private updateWorldVisuals(dt: number): void {
-    // Gentle Buriganga boat bobbing
+    // Keep procedural Sky Dome centered on the active camera
+    this.world.skyDome.position.copy(this.camera.position);
+
+    // Gentle Buriganga boat bobbing & animated river/lake water ripple current
     const t = performance.now() * 0.001;
     for (const b of this.world.boats) {
       b.group.position.y = -0.92 + Math.sin(t * 1.7 + b.phase) * 0.08;
       b.group.rotation.z = Math.sin(t * 1.3 + b.phase) * 0.04;
+    }
+    this.world.riverMat.emissiveIntensity = 0.08 + Math.sin(t * 1.1) * 0.035;
+    for (const wMat of this.world.waterMaterials) {
+      if (wMat.bumpMap) {
+        wMat.bumpMap.offset.x = (wMat.bumpMap.offset.x + dt * 0.032) % 1;
+        wMat.bumpMap.offset.y = (wMat.bumpMap.offset.y + dt * 0.015) % 1;
+      }
     }
 
     // Monsoon rain streaks around active camera
@@ -2062,17 +2379,17 @@ export class DhakaGameEngine {
     this.world.rainPoints.visible = raining;
     if (raining) {
       const arr = this.world.rainPositions;
-      const fallSpeed = this.weather === 'storm' ? 28 : 20;
-      const windX = this.weather === 'storm' ? 4.5 : 1.5;
+      const fallSpeed = this.weather === 'storm' ? 30 : 21;
+      const windX = this.weather === 'storm' ? 5.0 : 1.8;
       const cx = this.camera.position.x;
       const cz = this.camera.position.z;
       for (let i = 0; i < arr.length; i += 3) {
         arr[i] += windX * dt;
         arr[i + 1] -= fallSpeed * dt;
         if (arr[i + 1] < 0) {
-          arr[i] = cx + (Math.random() - 0.5) * 60;
-          arr[i + 1] = 22 + Math.random() * 8;
-          arr[i + 2] = cz + (Math.random() - 0.5) * 60;
+          arr[i] = cx + (Math.random() - 0.5) * 72;
+          arr[i + 1] = 24 + Math.random() * 10;
+          arr[i + 2] = cz + (Math.random() - 0.5) * 72;
         }
       }
       (this.world.rainPoints.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
@@ -2080,12 +2397,12 @@ export class DhakaGameEngine {
   }
 
   private updateTitleCamera(): void {
-    // Cinematic flyover framing Shapla Monument Crossing, Gulshan skyline, and lively Dhaka avenues
-    const r = 42;
+    // Wide cinematic flyover showcasing Shapla Crossing, Dhaka Express Flyover, and expanded Motijheel/Gulshan skylines
+    const r = 56;
     const cx = Math.sin(this.titleAngle) * r;
-    const cz = Math.cos(this.titleAngle) * r * 0.82 + 10;
-    this.camera.position.set(cx, 18.5 + Math.sin(this.titleAngle * 1.5) * 2.5, cz);
-    this.camera.lookAt(-6, 5.5, -4);
+    const cz = Math.cos(this.titleAngle) * r * 0.84 + 14;
+    this.camera.position.set(cx, 22.5 + Math.sin(this.titleAngle * 1.4) * 3.0, cz);
+    this.camera.lookAt(4, 7.0, -10);
   }
 
   private updateGameplayCamera(dt: number): void {
@@ -2202,9 +2519,9 @@ export class DhakaGameEngine {
   private computeInteractPrompt(): { prompt: string | null; key: string | null } {
     for (const poi of POIS) {
       if (Math.hypot(poi.x - this.player.x, poi.z - this.player.z) <= poi.radius + 2.0) {
-        if (poi.id === 'garage') return { prompt: 'Open Dhaka Customs Garage', key: 'G' };
-        if (poi.id === 'shop') return { prompt: "Enter Babu's Hardware & Gear", key: 'G' };
-        if (poi.id === 'tea_stall') return { prompt: 'Drink Masala Cha (+25 HP)', key: 'G' };
+        if (poi.kind === 'garage') return { prompt: `Open ${poi.name}`, key: 'G' };
+        if (poi.kind === 'shop') return { prompt: `Enter ${poi.name}`, key: 'G' };
+        if (poi.kind === 'tea_stall') return { prompt: `Drink Masala Cha at ${poi.name} (+25 HP)`, key: 'G' };
       }
     }
     if (!this.player.vehicleId) {
@@ -2219,6 +2536,7 @@ export class DhakaGameEngine {
   private emitHud(): void {
     const distId = getDistrictAt(this.player.x, this.player.z);
     const distMeta = DISTRICT_META[distId];
+    const streetMeta = getNearestStreetCorridor(this.player.x, this.player.z, ROAD_SEGMENTS);
     const veh = this.player.vehicleId ? this.vehicles.find((v) => v.id === this.player.vehicleId) : null;
     const mission = STORY_MISSIONS[this.missionIdx];
     const step = mission?.steps[this.stepIdx];
@@ -2226,8 +2544,8 @@ export class DhakaGameEngine {
 
     const blips: MinimapBlip[] = [];
     POIS.forEach((p) => {
-      if (p.id === 'garage') blips.push({ x: p.x, z: p.z, kind: 'garage' });
-      if (p.id === 'shop') blips.push({ x: p.x, z: p.z, kind: 'shop' });
+      if (p.kind === 'garage') blips.push({ x: p.x, z: p.z, kind: 'garage' });
+      if (p.kind === 'shop') blips.push({ x: p.x, z: p.z, kind: 'shop' });
     });
     if (step) {
       blips.push({ x: step.targetX, z: step.targetZ, kind: 'mission' });
@@ -2252,9 +2570,18 @@ export class DhakaGameEngine {
       modal: this.modal,
       districtName: distMeta.name,
       districtBangla: distMeta.bangla,
+      streetName: streetMeta?.name ?? null,
+      streetBangla: streetMeta?.banglaName ?? null,
       timeOfDay: this.timeOfDay,
       timeLabel: formatDhakaTime(this.timeOfDay),
       weather: this.weather,
+      graphicsQuality: this.graphicsQuality,
+      characterRigMode: this.playerRig.isGlbBacked ? 'glb' : 'procedural',
+      liveWeather: { ...this.liveWeatherState },
+      regionalPlaces: {
+        ...this.regionalPlacesState,
+        places: this.regionalPlacesState.places.map((p) => ({ ...p, upazilas: [...p.upazilas] })),
+      },
       hp: Math.round(this.player.hp),
       maxHp: this.player.maxHp,
       armor: Math.round(this.player.armor),
@@ -2318,6 +2645,8 @@ export class DhakaGameEngine {
     window.removeEventListener('mousemove', this.onMouseMove);
     this.renderer.domElement.removeEventListener('mousedown', this.onMouseDown);
     this.renderer.domElement.removeEventListener('contextmenu', this.onContextMenu);
+    this.playerRig.animator.disposeMixer();
+    this.npcRigs.forEach((rig) => rig.animator.disposeMixer());
     this.world.disposables.forEach((d) => d.dispose());
     this.textures.dispose();
     this.audio.dispose();
