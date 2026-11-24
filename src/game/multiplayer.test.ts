@@ -315,7 +315,9 @@ test('multiplayer: AccountStore enforces PIN authentication for protected CallSi
   const registered = store.authenticate('SyndicateBoss', undefined, '7788');
   assert.equal(registered.ok, true);
   if (!registered.ok) return;
-  assert.equal(registered.account.pin, '7788');
+  assert.ok(registered.account.pin, 'PIN hash must exist');
+  assert.ok(registered.account.pin.includes(':'), 'PIN must be stored as salted hash');
+  assert.notEqual(registered.account.pin, '7788', 'Plaintext PIN must never be stored directly');
 
   // 2. Reject incorrect PIN
   const wrongPin = store.authenticate('SyndicateBoss', undefined, '0000');

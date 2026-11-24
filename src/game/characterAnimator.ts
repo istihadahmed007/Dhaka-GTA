@@ -835,6 +835,32 @@ export class CharacterAnimator {
       if (this.rightUpperArmBone) this.rightUpperArmBone.rotation.x = -1.45;
       if (this.rightForearmBone) this.rightForearmBone.rotation.x = -0.35;
       if (this.spineBone) this.spineBone.rotation.y += 0.25;
+    } else {
+      // Natural locomotion & idle head dynamics:
+      // 1. Turn look-ahead: head anticipates turn direction
+      const turnRate = input.turnRate ?? 0;
+      if (this.headBone) {
+        this.headBone.rotation.y += turnRate * 0.16;
+        this.headBone.rotation.z += turnRate * 0.08;
+      }
+      if (this.chestBone) {
+        this.chestBone.rotation.y += turnRate * 0.1;
+      }
+
+      // 2. Idle street awareness: subtle ambient scanning when stationary
+      if (input.speed < 0.25 && this.headBone) {
+        const scan = Math.sin(this.phase * 0.35) * 0.07;
+        const nod = Math.cos(this.phase * 0.2) * 0.035;
+        this.headBone.rotation.y += scan;
+        this.headBone.rotation.x += nod;
+      }
+
+      // 3. Impact / hit flinch & recoil reaction: head pulls back on damage
+      if (this.hitTimer > 0 && this.headBone) {
+        const flinchRatio = this.hitTimer / 0.3;
+        this.headBone.rotation.x -= flinchRatio * 0.24;
+        this.headBone.rotation.z += (Math.sin(this.phase * 4.0) > 0 ? 1 : -1) * flinchRatio * 0.12;
+      }
     }
 
     // Two-Bone IK Foot Ground Clamping (adapts knees to ground without sliding)
@@ -991,6 +1017,16 @@ export class CharacterAnimator {
       p.torso.rotation.x = blend.forwardLeanRad + inertiaPitch + landingCompression * 0.8;
       p.torso.rotation.y = Math.sin(this.phase) * strideAmp * 0.14 + (this.smoothedTurnRate * 0.12);
       p.torso.rotation.z = blend.bankingRad;
+    }
+
+    if (p.head) {
+      const turnRate = input.turnRate ?? 0;
+      p.head.rotation.y = turnRate * 0.18 + (input.speed < 0.25 ? Math.sin(this.phase * 0.35) * 0.08 : 0);
+      if (this.hitTimer > 0) {
+        p.head.rotation.x = -(this.hitTimer / 0.3) * 0.25;
+      } else {
+        p.head.rotation.x = 0;
+      }
     }
 
     // Aiming & Shooting upper body overlay

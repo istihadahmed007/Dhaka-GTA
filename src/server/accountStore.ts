@@ -3,6 +3,33 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { OutfitId, WeaponId } from '../game/types';
 
+/**
+ * Generates a salted SHA-256 hash for secure account PIN storage.
+ */
+export function hashPin(pin: string, salt = crypto.randomBytes(16).toString('hex')): string {
+  const hash = crypto.createHash('sha256').update(`${salt}:${pin}`).digest('hex');
+  return `${salt}:${hash}`;
+}
+
+/**
+ * Constant-time verification of user PIN against stored salted hash or legacy plaintext.
+ */
+export function verifyPin(pin: string, storedHashOrPlain: string): boolean {
+  if (storedHashOrPlain.includes(':')) {
+    const parts = storedHashOrPlain.split(':');
+    if (parts.length === 2) {
+      const [salt, expectedHash] = parts;
+      const actualHash = crypto.createHash('sha256').update(`${salt}:${pin}`).digest('hex');
+      try {
+        return crypto.timingSafeEqual(Buffer.from(actualHash), Buffer.from(expectedHash));
+      } catch {
+        return false;
+      }
+    }
+  }
+  return storedHashOrPlain === pin;
+}
+
 export interface PersistentAccount {
   id: string;
   name: string;
@@ -85,7 +112,11 @@ export class AccountStore {
     if (existingId) {
       const existing = this.accounts.get(existingId);
       if (existing) {
-        if (pin && existing.pin && existing.pin === pin.trim()) {
+        if (pin && existing.pin && verifyPin(pin.trim(), existing.pin)) {
+          // If legacy plain, automatically migrate to salted hash
+          if (!existing.pin.includes(':')) {
+            existing.pin = hashPin(pin.trim());
+          }
           existing.lastSeenAt = Date.now();
           this.scheduleSave();
           return { ok: true, account: existing, isNew: false };
@@ -105,7 +136,7 @@ export class AccountStore {
       id,
       name: cleanName,
       token: newToken,
-      pin: pin ? pin.trim().slice(0, 8) : undefined,
+      pin: pin ? hashPin(pin.trim().slice(0, 8)) : undefined,
       outfit: preferredOutfit,
       color: preferredColor,
       money: 1200, // Starter Taka

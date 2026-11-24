@@ -5,6 +5,7 @@ services:
     plan: free
     buildCommand: npm ci
     startCommand: npm run server
+    healthCheckPath: /health
     envVars:
       - key: PORT
         value: 10000
