@@ -1,5 +1,9 @@
 import type { GraphicsQualityPreset } from './graphicsQuality';
+import type { ProtagonistId, SpecialAbilityKind } from './protagonists';
+import type { CameraViewMode } from './cameraSystem';
 export type { GraphicsQualityPreset } from './graphicsQuality';
+export type { ProtagonistId, SpecialAbilityKind } from './protagonists';
+export type { CameraViewMode } from './cameraSystem';
 
 export type GamePhase = 'title' | 'playing' | 'paused' | 'gameover' | 'victory';
 
@@ -315,6 +319,10 @@ export interface PlayerState {
   carTheftsCompleted: number;
   distanceDriven: number;
   isSwimming?: boolean;
+  protagonist?: ProtagonistId;
+  specialAbilityActive?: boolean;
+  specialAbilityTimer?: number;
+  specialAbilityCooldown?: number;
 }
 
 export interface NpcState {
@@ -455,6 +463,18 @@ export interface HudSnapshot {
   weather: WeatherMode;
   graphicsQuality: GraphicsQualityPreset;
   characterRigMode: 'glb' | 'procedural';
+  activeProtagonist: ProtagonistId;
+  protagonistName: string;
+  protagonistBangla: string;
+  protagonistAbilityName: string;
+  protagonistAbilityBangla: string;
+  protagonistAbilityActive: boolean;
+  protagonistAbilityTimerRatio: number;
+  protagonistAbilityCooldownRatio: number;
+  cameraViewMode: CameraViewMode;
+  characterSwitching: boolean;
+  characterSwitchBanner: string | null;
+  characterSwitchBangla: string | null;
   liveWeather: LiveWeatherHudState;
   regionalPlaces: RegionalPlacesHudState;
   hp: number;

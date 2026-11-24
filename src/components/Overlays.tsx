@@ -129,13 +129,12 @@ export const Overlays: React.FC<OverlaysProps> = ({
                     key={w}
                     type="button"
                     onClick={() => onSetWeather(w)}
-                    className={`px-2 py-1 text-xs font-semibold uppercase transition-colors cursor-pointer ${
-                      hud.weather === w && !lw.enabled
-                        ? 'bg-[#e6a135] text-[#0b0e13]'
-                        : hud.weather === w
-                          ? 'bg-[#e6a135]/75 text-[#0b0e13]'
-                          : 'bg-[#1b2432] hover:bg-[#0f7a53] text-[#f5f2eb]'
-                    }`}
+                    className={`px-2 py-1 text-xs font-semibold uppercase transition-colors cursor-pointer ${hud.weather === w && !lw.enabled
+                      ? 'bg-[#e6a135] text-[#0b0e13]'
+                      : hud.weather === w
+                        ? 'bg-[#e6a135]/75 text-[#0b0e13]'
+                        : 'bg-[#1b2432] hover:bg-[#0f7a53] text-[#f5f2eb]'
+                      }`}
                   >
                     {w === 'clear' ? 'Clear Tropical' : w === 'monsoon' ? 'Monsoon Rain' : 'Thunderstorm'}
                   </button>
@@ -161,11 +160,10 @@ export const Overlays: React.FC<OverlaysProps> = ({
                   type="button"
                   data-testid={`quality-${q}`}
                   onClick={() => onSetGraphicsQuality(q)}
-                  className={`px-2 py-1.5 text-xs font-semibold uppercase transition-colors cursor-pointer ${
-                    hud.graphicsQuality === q
-                      ? 'bg-[#e6a135] text-[#0b0e13]'
-                      : 'bg-[#1b2432] hover:bg-[#0f7a53] text-[#f5f2eb]'
-                  }`}
+                  className={`px-2 py-1.5 text-xs font-semibold uppercase transition-colors cursor-pointer ${hud.graphicsQuality === q
+                    ? 'bg-[#e6a135] text-[#0b0e13]'
+                    : 'bg-[#1b2432] hover:bg-[#0f7a53] text-[#f5f2eb]'
+                    }`}
                 >
                   {q}
                 </button>
@@ -199,11 +197,10 @@ export const Overlays: React.FC<OverlaysProps> = ({
                   type="button"
                   data-testid="toggle-live-weather"
                   onClick={() => onToggleLiveWeather(!lw.enabled)}
-                  className={`px-3 py-1 text-[11px] font-bold uppercase cursor-pointer transition-colors ${
-                    lw.enabled
-                      ? 'bg-[#0f7a53] text-[#f8f5ee] border border-[#34d399]'
-                      : 'bg-[#1b2432] hover:bg-[#0f7a53] text-[#cbd5e1] border border-white/15'
-                  }`}
+                  className={`px-3 py-1 text-[11px] font-bold uppercase cursor-pointer transition-colors ${lw.enabled
+                    ? 'bg-[#0f7a53] text-[#f8f5ee] border border-[#34d399]'
+                    : 'bg-[#1b2432] hover:bg-[#0f7a53] text-[#cbd5e1] border border-white/15'
+                    }`}
                 >
                   {lw.enabled ? 'Enabled' : 'Off'}
                 </button>
@@ -256,11 +253,10 @@ export const Overlays: React.FC<OverlaysProps> = ({
                 type="button"
                 data-testid="toggle-regional-places"
                 onClick={() => onToggleRegionalPlaces(!rp.enabled)}
-                className={`px-3 py-1 text-[11px] font-bold uppercase cursor-pointer transition-colors ${
-                  rp.enabled
-                    ? 'bg-[#0f7a53] text-[#f8f5ee] border border-[#34d399]'
-                    : 'bg-[#1b2432] hover:bg-[#334155] text-[#cbd5e1] border border-white/15'
-                }`}
+                className={`px-3 py-1 text-[11px] font-bold uppercase cursor-pointer transition-colors ${rp.enabled
+                  ? 'bg-[#0f7a53] text-[#f8f5ee] border border-[#34d399]'
+                  : 'bg-[#1b2432] hover:bg-[#334155] text-[#cbd5e1] border border-white/15'
+                  }`}
               >
                 {rp.enabled ? 'Hide' : 'Load BDAPIs'}
               </button>
@@ -294,8 +290,8 @@ export const Overlays: React.FC<OverlaysProps> = ({
 
           <div className="mt-3 bg-[#0b0f16] p-3 border border-white/10 text-xs text-[#cbd5e1] leading-relaxed">
             <strong className="text-[#f5d07a] uppercase">Controls:</strong> WASD Move/Drive · Space Jump/Handbrake ·
-            Q/E or Right-Drag Camera · F Enter/Exit Vehicle · Left Click / J Attack · 1–4 Weapons · R Reload · H Horn ·
-            G Shop/Garage · C Wardrobe · N CNG Fare Job
+            Right-Drag Camera · C Switch Protagonist (Tariq / Maya) · V Camera View · X / Q Special Ability · F Enter/Exit Vehicle ·
+            Left Click / J Attack · 1–4 Weapons · R Reload · H Horn · G Shop/Garage · O Wardrobe · N Fare Job
             <div className="mt-1 text-[10px] text-[#64748b]">{OSM_ATTRIBUTION_NOTE}</div>
           </div>
 
@@ -374,17 +370,15 @@ export const Overlays: React.FC<OverlaysProps> = ({
           role="dialog"
           aria-modal="true"
           aria-label={isVictory ? 'Victory' : 'Game Over'}
-          className={`w-full max-w-md bg-[#111720] border-t-4 ${
-            isVictory ? 'border-[#e6a135]' : 'border-[#dc2626]'
-          } border-x border-b border-white/15 p-7 shadow-[0_24px_60px_rgba(0,0,0,0.9)] text-center`}
+          className={`w-full max-w-md bg-[#111720] border-t-4 ${isVictory ? 'border-[#e6a135]' : 'border-[#dc2626]'
+            } border-x border-b border-white/15 p-7 shadow-[0_24px_60px_rgba(0,0,0,0.9)] text-center`}
         >
           <div className="font-bangla text-sm text-[#f5d07a]">
             {isVictory ? 'ঢাকার রাজা · অভিযান সম্পন্ন' : 'অভিযান ব্যর্থ'}
           </div>
           <h2
-            className={`font-display text-5xl font-extrabold uppercase tracking-wider mt-1 ${
-              isVictory ? 'text-[#fbbf24]' : 'text-[#ef4444]'
-            }`}
+            className={`font-display text-5xl font-extrabold uppercase tracking-wider mt-1 ${isVictory ? 'text-[#fbbf24]' : 'text-[#ef4444]'
+              }`}
           >
             {isVictory ? 'KING OF DHAKA' : hud.stats.cause || 'WASTED'}
           </h2>
@@ -499,33 +493,30 @@ export const Overlays: React.FC<OverlaysProps> = ({
               <button
                 type="button"
                 onClick={() => setGarageTab('service')}
-                className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer ${
-                  garageTab === 'service'
-                    ? 'border-b-2 border-[#e6a135] text-[#f5d07a]'
-                    : 'text-[#94a3b8] hover:text-[#f8f5ee]'
-                }`}
+                className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer ${garageTab === 'service'
+                  ? 'border-b-2 border-[#e6a135] text-[#f5d07a]'
+                  : 'text-[#94a3b8] hover:text-[#f8f5ee]'
+                  }`}
               >
                 Service & Repairs
               </button>
               <button
                 type="button"
                 onClick={() => setGarageTab('performance')}
-                className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer ${
-                  garageTab === 'performance'
-                    ? 'border-b-2 border-[#e6a135] text-[#f5d07a]'
-                    : 'text-[#94a3b8] hover:text-[#f8f5ee]'
-                }`}
+                className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer ${garageTab === 'performance'
+                  ? 'border-b-2 border-[#e6a135] text-[#f5d07a]'
+                  : 'text-[#94a3b8] hover:text-[#f8f5ee]'
+                  }`}
               >
                 Engine & Tuning
               </button>
               <button
                 type="button"
                 onClick={() => setGarageTab('styling')}
-                className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer ${
-                  garageTab === 'styling'
-                    ? 'border-b-2 border-[#e6a135] text-[#f5d07a]'
-                    : 'text-[#94a3b8] hover:text-[#f8f5ee]'
-                }`}
+                className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer ${garageTab === 'styling'
+                  ? 'border-b-2 border-[#e6a135] text-[#f5d07a]'
+                  : 'text-[#94a3b8] hover:text-[#f8f5ee]'
+                  }`}
               >
                 Custom Styling
               </button>
@@ -876,11 +867,10 @@ export const Overlays: React.FC<OverlaysProps> = ({
                   key={oId}
                   type="button"
                   onClick={() => onOutfitSelect(oId)}
-                  className={`p-3.5 text-left border transition-colors cursor-pointer ${
-                    active
-                      ? 'bg-[#0f7a53]/25 border-[#34d399]'
-                      : 'bg-[#0b0f16] border-white/15 hover:border-[#f5d07a]'
-                  }`}
+                  className={`p-3.5 text-left border transition-colors cursor-pointer ${active
+                    ? 'bg-[#0f7a53]/25 border-[#34d399]'
+                    : 'bg-[#0b0f16] border-white/15 hover:border-[#f5d07a]'
+                    }`}
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-display text-lg font-bold uppercase text-[#f8f5ee]">{spec.name}</span>
@@ -907,9 +897,8 @@ export const Overlays: React.FC<OverlaysProps> = ({
                 <span className="text-xs font-bold uppercase tracking-wider text-[#94a3b8]">Connection Status</span>
                 <span
                   data-testid="mp-status-pill"
-                  className={`px-2 py-0.5 text-xs font-extrabold uppercase ${
-                    hud.multiplayerActive ? 'bg-[#0f7a53] text-[#34d399]' : 'bg-[#ef4444]/20 text-[#f87171]'
-                  }`}
+                  className={`px-2 py-0.5 text-xs font-extrabold uppercase ${hud.multiplayerActive ? 'bg-[#0f7a53] text-[#34d399]' : 'bg-[#ef4444]/20 text-[#f87171]'
+                    }`}
                 >
                   {hud.multiplayerActive ? `● ONLINE (${hud.multiplayerPing}ms)` : '○ OFFLINE (Single Player)'}
                 </span>

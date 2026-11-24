@@ -19,6 +19,18 @@ const INITIAL_HUD: HudSnapshot = {
   weather: 'clear',
   graphicsQuality: 'high',
   characterRigMode: 'procedural',
+  activeProtagonist: 'tariq',
+  protagonistName: 'Tariq',
+  protagonistBangla: 'তারেক',
+  protagonistAbilityName: 'Street Overdrive',
+  protagonistAbilityBangla: 'স্ট্রিট ওভারড্রাইভ',
+  protagonistAbilityActive: false,
+  protagonistAbilityTimerRatio: 0,
+  protagonistAbilityCooldownRatio: 0,
+  cameraViewMode: 'third_person_close',
+  characterSwitching: false,
+  characterSwitchBanner: null,
+  characterSwitchBangla: null,
   liveWeather: {
     enabled: false,
     status: 'idle',
@@ -166,6 +178,9 @@ export default function App() {
   const handleDisconnectMultiplayer = useCallback(() => engineRef.current?.disconnectMultiplayer(), []);
   const handleSendChat = useCallback((text: string) => engineRef.current?.sendChatMessage(text), []);
   const handleOpenMultiplayerLobby = useCallback(() => engineRef.current?.openMultiplayerLobby(), []);
+  const handleSwitchProtagonist = useCallback(() => engineRef.current?.switchProtagonist(), []);
+  const handleToggleAbility = useCallback(() => engineRef.current?.toggleSpecialAbility(), []);
+  const handleCycleCamera = useCallback(() => engineRef.current?.cycleCameraView(), []);
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-[#0b0e13]">
@@ -194,6 +209,9 @@ export default function App() {
           onUseItem={handleUseItem}
           onOpenMultiplayerLobby={handleOpenMultiplayerLobby}
           onSendChatMessage={handleSendChat}
+          onSwitchProtagonist={handleSwitchProtagonist}
+          onToggleAbility={handleToggleAbility}
+          onCycleCamera={handleCycleCamera}
         />
       )}
 

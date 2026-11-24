@@ -591,6 +591,10 @@ export function createInitialPlayerState(): PlayerState {
     bountiesCompleted: 0,
     carTheftsCompleted: 0,
     distanceDriven: 0,
+    protagonist: 'tariq',
+    specialAbilityActive: false,
+    specialAbilityTimer: 0,
+    specialAbilityCooldown: 0,
   };
 }
 

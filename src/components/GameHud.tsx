@@ -12,6 +12,9 @@ interface GameHudProps {
   onUseItem?: (itemId: string) => void;
   onOpenMultiplayerLobby?: () => void;
   onSendChatMessage?: (text: string) => void;
+  onSwitchProtagonist?: () => void;
+  onToggleAbility?: () => void;
+  onCycleCamera?: () => void;
 }
 
 const WEAPON_ORDER: WeaponId[] = ['fists', 'pistol', 'smg', 'shotgun'];
@@ -26,6 +29,9 @@ export const GameHud: React.FC<GameHudProps> = ({
   onUseItem,
   onOpenMultiplayerLobby,
   onSendChatMessage,
+  onSwitchProtagonist,
+  onToggleAbility,
+  onCycleCamera,
 }) => {
   // Delayed trailing damage ghost bar for player HP
   const [ghostHp, setGhostHp] = useState(hud.hp);
@@ -192,10 +198,103 @@ export const GameHud: React.FC<GameHudProps> = ({
             tabIndex={-1}
             onClick={(e) => {
               e.currentTarget.blur();
+              onCycleCamera?.();
+            }}
+            aria-label="Cycle camera view"
+            title="Camera View [V]"
+            className="pointer-events-auto h-9 px-2 flex items-center gap-1.5 bg-[#10151c]/92 border border-[#e6a135]/40 hover:border-[#f5d07a] text-[#f5f2eb] cursor-pointer"
+          >
+            <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 fill-current" aria-hidden="true">
+              <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" />
+            </svg>
+            <span className="font-display text-[10px] font-bold uppercase tracking-wider text-[#f5d07a]">
+              {hud.cameraViewMode === 'first_person'
+                ? '1ST'
+                : hud.cameraViewMode === 'third_person_far'
+                ? 'CHASE'
+                : hud.cameraViewMode === 'cinematic'
+                ? 'CINE'
+                : '3RD'}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            tabIndex={-1}
+            onClick={(e) => {
+              e.currentTarget.blur();
+              onSwitchProtagonist?.();
+            }}
+            aria-label="Switch protagonist"
+            title="Switch Character [C]"
+            className={`pointer-events-auto h-9 px-2.5 flex items-center gap-2 border transition-colors cursor-pointer ${
+              hud.activeProtagonist === 'tariq'
+                ? 'bg-[#1e293b]/95 border-[#38bdf8] text-[#38bdf8]'
+                : 'bg-[#2a131b]/95 border-[#fb7185] text-[#fb7185]'
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-current animate-pulse" />
+            <div className="flex flex-col text-left leading-none">
+              <span className="font-display text-[10px] font-bold uppercase tracking-wider">
+                {hud.protagonistName} [C]
+              </span>
+              <span className="font-bangla text-[9px] opacity-80 mt-0.5">
+                {hud.protagonistBangla}
+              </span>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            tabIndex={-1}
+            onClick={(e) => {
+              e.currentTarget.blur();
+              onToggleAbility?.();
+            }}
+            aria-label="Activate special ability"
+            title={`${hud.protagonistAbilityName} [X / Q]`}
+            className={`pointer-events-auto h-9 px-2 flex items-center gap-1.5 border transition-all cursor-pointer ${
+              hud.protagonistAbilityActive
+                ? 'bg-[#eab308]/30 border-[#eab308] text-[#fef08a] shadow-[0_0_15px_rgba(234,179,8,0.6)]'
+                : hud.protagonistAbilityCooldownRatio > 0
+                ? 'bg-[#10151c]/90 border-gray-600 text-gray-400'
+                : 'bg-[#10151c]/92 border-[#e6a135]/60 hover:border-[#f5d07a] text-[#f5f2eb]'
+            }`}
+          >
+            <div className="flex flex-col text-left leading-none">
+              <span className="font-display text-[9px] font-bold uppercase tracking-wider">
+                {hud.protagonistAbilityActive ? 'ACTIVE!' : `${hud.protagonistAbilityName} [X]`}
+              </span>
+              <div className="w-16 h-1 bg-black/40 mt-1 rounded overflow-hidden">
+                <div
+                  className={`h-full transition-all ${
+                    hud.protagonistAbilityActive
+                      ? 'bg-[#eab308]'
+                      : hud.protagonistAbilityCooldownRatio > 0
+                      ? 'bg-red-500'
+                      : 'bg-[#34d399]'
+                  }`}
+                  style={{
+                    width: hud.protagonistAbilityActive
+                      ? `${Math.round(hud.protagonistAbilityTimerRatio * 100)}%`
+                      : hud.protagonistAbilityCooldownRatio > 0
+                      ? `${Math.round((1 - hud.protagonistAbilityCooldownRatio) * 100)}%`
+                      : '100%',
+                  }}
+                />
+              </div>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            tabIndex={-1}
+            onClick={(e) => {
+              e.currentTarget.blur();
               onOpenWardrobe();
             }}
             aria-label="Open character wardrobe"
-            title="Wardrobe [C]"
+            title="Wardrobe [O]"
             className="pointer-events-auto w-9 h-9 flex items-center justify-center bg-[#10151c]/92 border border-[#e6a135]/40 hover:border-[#f5d07a] text-[#f5f2eb] cursor-pointer"
           >
             <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current" aria-hidden="true">
@@ -543,6 +642,25 @@ export const GameHud: React.FC<GameHudProps> = ({
             >
               [N] {hud.fareActive ? 'Cancel Fare' : 'Fare Job'}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Fullscreen Cinematic Character Switch Sky-Cam Banner */}
+      {hud.characterSwitching && (
+        <div className="fixed inset-0 pointer-events-none flex flex-col items-center justify-center z-50 bg-black/30 backdrop-blur-[2px] transition-all">
+          <div className="bg-[#0b0e14]/92 border-y-2 border-[#e6a135] px-12 py-5 text-center shadow-[0_12px_40px_rgba(0,0,0,0.85)] max-w-lg w-full">
+            <div className="text-[11px] font-bold uppercase tracking-[0.35em] text-[#e6a135]">
+              CHARACTER TRANSITION · চরিত্র পরিবর্তন
+            </div>
+            <div className="font-display text-2xl sm:text-3xl font-extrabold uppercase tracking-widest text-[#f8fafc] mt-1.5">
+              {hud.characterSwitchBanner}
+            </div>
+            {hud.characterSwitchBangla && (
+              <div className="font-bangla text-base text-[#f5d07a] mt-1 font-semibold">
+                {hud.characterSwitchBangla}
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -119,6 +119,15 @@ import {
 import { NetworkClient } from './multiplayer/networkClient';
 import { RemotePlayerRig } from './multiplayer/remotePlayerRig';
 import { NetPlayerState, resolveServerUrl, SCombatEventMsg } from './multiplayer/protocol';
+import { CameraRigController, CameraViewMode } from './cameraSystem';
+import {
+  CharacterSwitchState,
+  createInitialCharacterSwitchState,
+  createInitialProtagonistState,
+  PROTAGONIST_PROFILES,
+  ProtagonistId,
+  ProtagonistInstanceState,
+} from './protagonists';
 
 interface ParticleSlot {
   active: boolean;
@@ -269,7 +278,9 @@ export class DhakaGameEngine {
     error: null,
   };
 
-  // Camera & Juice
+  // Camera & Rig Controller
+  private cameraRig: CameraRigController;
+  private cameraViewMode: CameraViewMode = 'third_person_close';
   private camYaw = 0; // 0 means looking north (-Z) behind player
   private camPitch = 0.28;
   private camPos = new THREE.Vector3(0, 7, 48);
@@ -278,6 +289,15 @@ export class DhakaGameEngine {
   private trauma = 0;
   private hitstopTimer = 0;
   private raycaster = new THREE.Raycaster();
+
+  // Dual Protagonist System (Tariq & Maya)
+  private activeProtagonistId: ProtagonistId = 'tariq';
+  private secondaryProtagonistState: ProtagonistInstanceState;
+  private secondaryProtagonistRig: HumanoidRig | null = null;
+  private characterSwitchState: CharacterSwitchState = createInitialCharacterSwitchState();
+  private specialAbilityTimer = 0;
+  private specialAbilityCooldown = 0;
+  private specialAbilityActive = false;
 
   // Input State (separated held vs edge-triggered justPressed)
   private keysHeld = new Set<string>();
@@ -400,17 +420,49 @@ export class DhakaGameEngine {
     }
     this.particleMesh.instanceMatrix.needsUpdate = true;
 
+    // Camera Rig Setup
+    this.cameraRig = new CameraRigController(this.camPos, this.camTarget);
+
     // Player setup (instant sculpted procedural rig, smoothly upgraded to rigged GLB once loaded)
     this.player = createInitialPlayerState();
-    this.playerRig = createHumanoidRig(0x26466d, 0x1e2530, 0xe6a135, this.textures, {
-      isPlayer: true,
-      castShadow: !this.isSoftwareGl,
-    });
+    const tariqProf = PROTAGONIST_PROFILES.tariq;
+    this.playerRig = createHumanoidRig(
+      tariqProf.defaultColors.torso,
+      tariqProf.defaultColors.pants,
+      tariqProf.defaultColors.accent,
+      this.textures,
+      {
+        isPlayer: true,
+        castShadow: !this.isSoftwareGl,
+      },
+    );
     setHumanoidOutfit(this.playerRig, this.player.outfit);
     setHumanoidWeaponMesh(this.playerRig, this.player.weapon);
     this.playerRig.group.position.set(this.player.x, 0, this.player.z);
     this.playerRig.group.rotation.y = this.player.heading;
     this.scene.add(this.playerRig.group);
+
+    // Secondary Protagonist Setup (Maya stationed in Gulshan as ambient ally)
+    const mayaProf = PROTAGONIST_PROFILES.maya;
+    this.secondaryProtagonistState = createInitialProtagonistState('maya', 115, -120);
+    this.secondaryProtagonistRig = createHumanoidRig(
+      mayaProf.defaultColors.torso,
+      mayaProf.defaultColors.pants,
+      mayaProf.defaultColors.accent,
+      this.textures,
+      {
+        isPlayer: false,
+        castShadow: !this.isSoftwareGl,
+      },
+    );
+    setHumanoidOutfit(this.secondaryProtagonistRig, mayaProf.defaultOutfit);
+    setHumanoidWeaponMesh(this.secondaryProtagonistRig, mayaProf.preferredWeapon);
+    this.secondaryProtagonistRig.group.position.set(
+      this.secondaryProtagonistState.x,
+      0,
+      this.secondaryProtagonistState.z,
+    );
+    this.scene.add(this.secondaryProtagonistRig.group);
 
     this.trafficLights = createTrafficLightVisuals();
     this.scene.add(this.trafficLights.group);
@@ -632,6 +684,10 @@ export class DhakaGameEngine {
     upgradeHumanoidRigToGlb(this.playerRig, template, this.textures, !this.isSoftwareGl);
     setHumanoidOutfit(this.playerRig, this.player.outfit);
     setHumanoidWeaponMesh(this.playerRig, this.player.weapon);
+
+    if (this.secondaryProtagonistRig) {
+      upgradeHumanoidRigToGlb(this.secondaryProtagonistRig, template, this.textures, !this.isSoftwareGl);
+    }
 
     this.remotePlayerRigs.forEach((r) => {
       upgradeHumanoidRigToGlb(r.rig, template, this.textures, !this.isSoftwareGl);
@@ -1850,10 +1906,27 @@ export class DhakaGameEngine {
     }
 
     // Hitstop pauses gameplay physics briefly on heavy impact while camera shake renders
-    let simDt = dt;
+    // Focus Reflex (Maya) slows world simulation time to 0.45x while camera remains fluid
+    const isFocusReflex = this.specialAbilityActive && this.activeProtagonistId === 'maya';
+    const timeScale = isFocusReflex ? 0.45 : 1.0;
+    let simDt = dt * timeScale;
     if (this.hitstopTimer > 0) {
       this.hitstopTimer = Math.max(0, this.hitstopTimer - dt);
       simDt = 0;
+    }
+
+    // Tick active special ability timer and cooldown
+    if (this.specialAbilityActive) {
+      this.specialAbilityTimer -= dt;
+      if (this.specialAbilityTimer <= 0) {
+        this.specialAbilityActive = false;
+        this.specialAbilityTimer = 0;
+        this.showToast('Special Ability Ended');
+        this.emitHud();
+      }
+    }
+    if (this.specialAbilityCooldown > 0) {
+      this.specialAbilityCooldown = Math.max(0, this.specialAbilityCooldown - dt);
     }
 
     if (simDt > 0) {
@@ -2009,8 +2082,23 @@ export class DhakaGameEngine {
       this.tryInteractPoi();
     }
 
-    // Quick Outfit Wardrobe [C]
+    // GTA VI Dual Protagonist Switch [C]
     if (this.keysJustPressed.has('KeyC')) {
+      this.switchProtagonist();
+    }
+
+    // Toggle Camera View Mode [V] (First Person Cockpit / 3rd Close / 3rd Chase / Cinematic)
+    if (this.keysJustPressed.has('KeyV')) {
+      this.cycleCameraView();
+    }
+
+    // Toggle Protagonist Special Ability [X] or [Q] (Street Overdrive / Focus Reflex)
+    if (this.keysJustPressed.has('KeyX') || this.keysJustPressed.has('KeyQ')) {
+      this.toggleSpecialAbility();
+    }
+
+    // Quick Outfit Wardrobe [O]
+    if (this.keysJustPressed.has('KeyO')) {
       this.openWardrobe();
     }
 
@@ -2019,9 +2107,9 @@ export class DhakaGameEngine {
       this.toggleSideFare();
     }
 
-    // Cycle Time of Day [T] & Weather [V]
+    // Cycle Time of Day [T] & Weather [K]
     if (this.keysJustPressed.has('KeyT')) this.cycleTimePreset();
-    if (this.keysJustPressed.has('KeyV')) this.cycleWeather();
+    if (this.keysJustPressed.has('KeyK')) this.cycleWeather();
 
     // Weapon hotkeys [1..4]
     if (this.keysJustPressed.has('Digit1')) this.selectWeapon('fists');
@@ -2582,7 +2670,31 @@ export class DhakaGameEngine {
 
     const prevX = veh.x;
     const prevZ = veh.z;
+
+    // Street Overdrive ability (Tariq): extra torque, enhanced drift bite and speed boost
+    if (this.specialAbilityActive && this.activeProtagonistId === 'tariq') {
+      if (Math.abs(veh.speed) > 1.0) {
+        veh.speed *= 1.014;
+      }
+    }
+
     const res = stepVehicleKinematics(veh, { throttle, steer, handbrake }, dt, this.colliders);
+
+    // Tire smoke on handbrake drifting
+    if (handbrake && Math.abs(veh.speed) > 3.5 && !isWatercraftKind(veh.kind)) {
+      const sternDist = VEHICLE_SPECS[veh.kind].halfLength * 0.85;
+      const sternX = veh.x - Math.sin(veh.heading) * sternDist;
+      const sternZ = veh.z - Math.cos(veh.heading) * sternDist;
+      this.spawnBurst(sternX, 0.12, sternZ, 0xdfe6e9, 3, 2.2);
+    }
+
+    // Dynamic monsoon wet road spray particles
+    if (this.roadWetness > 0.15 && Math.abs(veh.speed) > 3.0 && !isWatercraftKind(veh.kind)) {
+      const sternDist = VEHICLE_SPECS[veh.kind].halfLength * 0.85;
+      const sternX = veh.x - Math.sin(veh.heading) * sternDist;
+      const sternZ = veh.z - Math.cos(veh.heading) * sternDist;
+      this.spawnBurst(sternX, 0.15, sternZ, 0xcfd8dc, 2, 2.0);
+    }
 
     this.player.distanceDriven += Math.hypot(veh.x - prevX, veh.z - prevZ);
     this.player.x = veh.x;
@@ -3626,101 +3738,164 @@ export class DhakaGameEngine {
   }
 
   private updateGameplayCamera(dt: number): void {
-    const inVeh = Boolean(this.player.vehicleId);
     const veh = this.player.vehicleId ? this.vehicles.find((v) => v.id === this.player.vehicleId) : null;
-    let dist = inVeh ? 10.6 : 7.2;
-    let height = inVeh ? 4.2 : 3.2;
+    const isAiming = !veh && (this.mouseHeld && this.player.weapon !== 'fists');
 
-    if (veh) {
-      if (veh.kind === 'launch') {
-        dist = 18.5;
-        height = 8.2;
-      } else if (veh.kind === 'speedboat') {
-        dist = 10.2;
-        height = 3.6;
-      } else if (veh.kind === 'jetski') {
-        dist = 7.8;
-        height = 2.8;
-      }
-    }
+    const camRes = this.cameraRig.step({
+      dt,
+      playerPos: { x: this.player.x, y: this.player.y, z: this.player.z },
+      playerHeading: this.player.heading,
+      playerVelocity: { x: this.player.vx, y: this.player.vy, z: this.player.vz },
+      camYaw: this.camYaw,
+      camPitch: this.camPitch,
+      viewMode: this.cameraViewMode,
+      inVehicle: Boolean(veh),
+      vehicleSpeed: veh ? veh.speed : 0,
+      vehicleSteerAngle: veh ? veh.steerAngle : 0,
+      vehicleKind: veh ? veh.kind : null,
+      isAiming,
+      trauma: this.trauma,
+      occluders: this.world.cameraOccluders,
+      characterSwitch: this.characterSwitchState,
+      focusReflexActive: this.specialAbilityActive && this.activeProtagonistId === 'maya',
+    });
 
-    // Contextual framing: Sprinting dynamic pull-back
-    const isSprinting = this.keysHeld.has('ShiftLeft') || this.keysHeld.has('ShiftRight');
-    if (!inVeh && isSprinting && Math.hypot(this.player.vx, this.player.vz) > 3.0) {
-      dist *= 1.14;
-      height *= 1.08;
-    }
-
-    // Contextual framing: Over-the-right-shoulder aiming
-    const isAiming = !inVeh && (this.mouseHeld && this.player.weapon !== 'fists');
-    let shoulderOffsetX = 0;
-    let shoulderOffsetZ = 0;
-    if (isAiming) {
-      dist = 4.4;
-      height = 2.4;
-      shoulderOffsetX = Math.cos(this.camYaw) * 0.62;
-      shoulderOffsetZ = -Math.sin(this.camYaw) * 0.62;
-    }
-
-    // Velocity lead offset (+0.32s lead in movement direction)
-    const moveVx = veh ? Math.sin(veh.heading) * veh.speed : this.player.vx;
-    const moveVz = veh ? Math.cos(veh.heading) * veh.speed : this.player.vz;
-    const leadTime = inVeh ? 0.35 : 0.28;
-    const leadX = moveVx * leadTime;
-    const leadZ = moveVz * leadTime;
-
-    const targetX = this.player.x + shoulderOffsetX + leadX;
-    const targetY = this.player.y + (inVeh ? (veh?.kind === 'launch' ? 3.4 : 1.65) : 1.55);
-    const targetZ = this.player.z + shoulderOffsetZ + leadZ;
-
-    const desiredX = targetX + Math.sin(this.camYaw) * Math.cos(this.camPitch) * dist;
-    const desiredY = targetY + Math.sin(this.camPitch) * dist + height * 0.32;
-    const desiredZ = targetZ + Math.cos(this.camYaw) * Math.cos(this.camPitch) * dist;
-
-    // Raycast from player anchor to desired camera position to pull in before clipping walls
-    _vecA.set(targetX, targetY, targetZ);
-    _vecB.set(desiredX, desiredY, desiredZ);
-    _vecC.subVectors(_vecB, _vecA);
-    const desiredLen = _vecC.length();
-    if (desiredLen > 0.1) {
-      _vecC.divideScalar(desiredLen);
-      this.raycaster.set(_vecA, _vecC);
-      this.raycaster.far = desiredLen;
-      const hits = this.raycaster.intersectObjects(this.world.cameraOccluders, false);
-      if (hits.length > 0 && hits[0].distance < desiredLen) {
-        const pulled = Math.max(2.2, hits[0].distance - 0.65);
-        _vecB.copy(_vecA).addScaledVector(_vecC, pulled);
-      }
-    }
-
-    const damp = 1 - Math.exp(-9.5 * dt);
-    this.camPos.lerp(_vecB, damp);
-    this.camTarget.lerp(_vecA, 1 - Math.exp(-14 * dt));
-
-    // Trauma-squared camera shake
-    const shake = this.trauma * this.trauma;
-    const sx = shake > 0.001 ? (Math.random() - 0.5) * shake * 0.85 : 0;
-    const sy = shake > 0.001 ? (Math.random() - 0.5) * shake * 0.65 : 0;
-
-    this.camera.position.set(this.camPos.x + sx, Math.max(1.2, this.camPos.y + sy), this.camPos.z);
-    this.camera.lookAt(this.camTarget.x, this.camTarget.y, this.camTarget.z);
-
-    // Dynamic contextual FOV: tight weapon aiming vs fast vehicle driving
-    const baseFov = isAiming ? 52 : 58;
-    const speedFovBoost = veh ? Math.min(16, Math.abs(veh.speed) * 0.52) : 0;
-    const targetFov = baseFov + speedFovBoost;
-    if (Math.abs(this.camera.fov - targetFov) > 0.08) {
-      this.camera.fov += (targetFov - this.camera.fov) * (1 - Math.exp(-6.5 * dt));
+    this.camera.position.copy(camRes.camPos);
+    this.camera.lookAt(camRes.camTarget);
+    if (Math.abs(this.camera.fov - camRes.fov) > 0.05) {
+      this.camera.fov = camRes.fov;
       this.camera.updateProjectionMatrix();
     }
+    this.camera.rotation.z = camRes.rollAngle;
+  }
 
-    // Dynamic banking camera roll into high-speed turns
-    if (veh && Math.abs(veh.steerAngle) > 0.02) {
-      const bank = -veh.steerAngle * Math.min(1.0, Math.abs(veh.speed) / 18) * 0.045;
-      this.camera.rotation.z += (bank - this.camera.rotation.z) * (1 - Math.exp(-8 * dt));
-    } else if (Math.abs(this.camera.rotation.z) > 0.001) {
-      this.camera.rotation.z *= Math.exp(-10 * dt);
+  public getActiveProtagonist(): ProtagonistId {
+    return this.activeProtagonistId;
+  }
+
+  public getCameraViewMode(): CameraViewMode {
+    return this.cameraViewMode;
+  }
+
+  public cycleCameraView(): void {
+    const modes: CameraViewMode[] = ['third_person_close', 'third_person_far', 'first_person', 'cinematic'];
+    const nextIdx = (modes.indexOf(this.cameraViewMode) + 1) % modes.length;
+    this.cameraViewMode = modes[nextIdx];
+    this.audio.playClick();
+    const labels: Record<CameraViewMode, string> = {
+      third_person_close: 'Camera: Action 3rd-Person Close',
+      third_person_far: 'Camera: Wide 3rd-Person Chase',
+      first_person: 'Camera: 1st-Person Cockpit View',
+      cinematic: 'Camera: Cinematic Bumper Angle',
+    };
+    this.showToast(labels[this.cameraViewMode]);
+    this.emitHud();
+  }
+
+  public toggleSpecialAbility(): void {
+    const profile = PROTAGONIST_PROFILES[this.activeProtagonistId];
+    if (this.specialAbilityActive) return;
+    if (this.specialAbilityCooldown > 0) {
+      this.showToast(`${profile.abilityName} Cooldown: ${Math.ceil(this.specialAbilityCooldown)}s`);
+      return;
     }
+    this.specialAbilityActive = true;
+    this.specialAbilityTimer = profile.abilityDuration;
+    this.specialAbilityCooldown = profile.abilityCooldown;
+    this.audio.playChime(true);
+    this.trauma = Math.min(1, this.trauma + 0.35);
+    this.showToast(`ACTIVATED: ${profile.abilityName} (${profile.abilityBangla})!`);
+    this.emitHud();
+  }
+
+  public switchProtagonist(): void {
+    if (this.characterSwitchState.active) return;
+    if (this.player.hp <= 0) return;
+
+    const fromId = this.activeProtagonistId;
+    const toId: ProtagonistId = fromId === 'tariq' ? 'maya' : 'tariq';
+    const targetProfile = PROTAGONIST_PROFILES[toId];
+
+    // Pack current player state
+    const currentPack: ProtagonistInstanceState = {
+      id: fromId,
+      x: this.player.x,
+      y: this.player.y,
+      z: this.player.z,
+      heading: this.player.heading,
+      hp: this.player.hp,
+      armor: this.player.armor,
+      stamina: this.player.stamina,
+      money: this.player.money,
+      weapon: this.player.weapon,
+      unlockedWeapons: [...this.player.unlockedWeapons],
+      ammo: { ...this.player.ammo },
+      magAmmo: { ...this.player.magAmmo },
+      outfit: this.player.outfit,
+      abilityTimer: this.specialAbilityTimer,
+      abilityCooldownTimer: this.specialAbilityCooldown,
+      abilityActive: this.specialAbilityActive,
+    };
+
+    // Unpack target protagonist
+    const targetState = this.secondaryProtagonistState;
+    this.secondaryProtagonistState = currentPack;
+    this.activeProtagonistId = toId;
+
+    // Reposition secondary rig to old spot
+    if (this.secondaryProtagonistRig) {
+      this.secondaryProtagonistRig.group.position.set(currentPack.x, currentPack.y, currentPack.z);
+      this.secondaryProtagonistRig.group.rotation.y = currentPack.heading;
+      setHumanoidOutfit(this.secondaryProtagonistRig, currentPack.outfit);
+      setHumanoidWeaponMesh(this.secondaryProtagonistRig, currentPack.weapon);
+    }
+
+    // Apply target attributes to player
+    this.player.x = targetState.x;
+    this.player.y = targetState.y;
+    this.player.z = targetState.z;
+    this.player.vx = 0;
+    this.player.vy = 0;
+    this.player.vz = 0;
+    this.player.heading = targetState.heading;
+    this.player.hp = THREE.MathUtils.clamp(targetState.hp, 20, targetProfile.attributes.maxHp);
+    this.player.maxHp = targetProfile.attributes.maxHp;
+    this.player.armor = targetState.armor;
+    this.player.maxArmor = targetProfile.attributes.maxArmor;
+    this.player.stamina = targetProfile.attributes.maxStamina;
+    this.player.maxStamina = targetProfile.attributes.maxStamina;
+    this.player.money = targetState.money;
+    this.player.weapon = targetState.weapon;
+    this.player.unlockedWeapons = targetState.unlockedWeapons;
+    this.player.ammo = targetState.ammo;
+    this.player.magAmmo = targetState.magAmmo;
+    this.player.outfit = targetState.outfit;
+    this.player.vehicleId = null;
+    this.playerRig.group.visible = true;
+
+    this.specialAbilityActive = false;
+    this.specialAbilityTimer = 0;
+    this.specialAbilityCooldown = targetState.abilityCooldownTimer;
+
+    setHumanoidOutfit(this.playerRig, this.player.outfit);
+    setHumanoidWeaponMesh(this.playerRig, this.player.weapon);
+
+    // 3-phase Sky-Cam transition
+    this.characterSwitchState.active = true;
+    this.characterSwitchState.phase = 'ascend';
+    this.characterSwitchState.timer = 0;
+    this.characterSwitchState.duration = 2.4;
+    this.characterSwitchState.fromId = fromId;
+    this.characterSwitchState.toId = toId;
+    this.characterSwitchState.fromPos = { x: currentPack.x, y: currentPack.y, z: currentPack.z };
+    this.characterSwitchState.toPos = { x: targetState.x, y: targetState.y, z: targetState.z };
+    this.characterSwitchState.skyAltitude = 58;
+    this.characterSwitchState.bannerText = `${targetProfile.name.toUpperCase()} — ${targetProfile.district.toUpperCase()}`;
+    this.characterSwitchState.bannerBangla = `${targetProfile.banglaName} — ${targetProfile.banglaDistrict}`;
+
+    this.audio.playChime(true);
+    this.showToast(`Switched to ${targetProfile.name} (${targetProfile.banglaName})`);
+    this.emitHud();
   }
 
   // === POOLED PARTICLE BURSTS ===
@@ -3864,6 +4039,7 @@ export class DhakaGameEngine {
 
     const w = this.player.weapon;
     const maxWantedCd = Math.max(1, 14 + this.player.wantedLevel * 4);
+    const currentProf = PROTAGONIST_PROFILES[this.activeProtagonistId];
 
     this.onHudUpdate({
       phase: this.phase,
@@ -3877,6 +4053,23 @@ export class DhakaGameEngine {
       weather: this.weather,
       graphicsQuality: this.graphicsQuality,
       characterRigMode: this.playerRig.isGlbBacked ? 'glb' : 'procedural',
+      activeProtagonist: this.activeProtagonistId,
+      protagonistName: currentProf.name,
+      protagonistBangla: currentProf.banglaName,
+      protagonistAbilityName: currentProf.abilityName,
+      protagonistAbilityBangla: currentProf.abilityBangla,
+      protagonistAbilityActive: this.specialAbilityActive,
+      protagonistAbilityTimerRatio: this.specialAbilityActive
+        ? THREE.MathUtils.clamp(this.specialAbilityTimer / currentProf.abilityDuration, 0, 1)
+        : 0,
+      protagonistAbilityCooldownRatio:
+        this.specialAbilityCooldown > 0
+          ? THREE.MathUtils.clamp(this.specialAbilityCooldown / currentProf.abilityCooldown, 0, 1)
+          : 0,
+      cameraViewMode: this.cameraViewMode,
+      characterSwitching: this.characterSwitchState.active,
+      characterSwitchBanner: this.characterSwitchState.bannerText || null,
+      characterSwitchBangla: this.characterSwitchState.bannerBangla || null,
       liveWeather: { ...this.liveWeatherState },
       regionalPlaces: {
         ...this.regionalPlacesState,
