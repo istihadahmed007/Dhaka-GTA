@@ -5,6 +5,9 @@ export interface DhakaTextureSet {
   asphaltBump: THREE.CanvasTexture;
   asphaltNormal: THREE.CanvasTexture;
   asphaltRoughness: THREE.CanvasTexture;
+  puddleMap: THREE.CanvasTexture;
+  puddleNormal: THREE.CanvasTexture;
+  puddleRoughness: THREE.CanvasTexture;
   sidewalkMap: THREE.CanvasTexture;
   sidewalkBump: THREE.CanvasTexture;
   sidewalkNormal: THREE.CanvasTexture;
@@ -23,6 +26,13 @@ export interface DhakaTextureSet {
   residentialMap: THREE.CanvasTexture;
   residentialEmissiveMap: THREE.CanvasTexture;
   waterBumpMap: THREE.CanvasTexture;
+  waterNormalMap: THREE.CanvasTexture;
+  waterDetailNormalMap: THREE.CanvasTexture;
+  rainSplashMap: THREE.CanvasTexture;
+  palmLeafMap: THREE.CanvasTexture;
+  krishnachuraMap: THREE.CanvasTexture;
+  crosswalkMap: THREE.CanvasTexture;
+  manholeMap: THREE.CanvasTexture;
   lampHaloMap: THREE.CanvasTexture;
   curbStripeMap: THREE.CanvasTexture;
   rickshawArtMap: THREE.CanvasTexture;
@@ -193,6 +203,92 @@ export function createDhakaTextures(maxAniso: number): DhakaTextureSet {
     arCtx.fillRect(x, y, 3, 5);
   }
   const asphaltRoughness = finalizeTexture(arC, false, maxAniso, 1, 1);
+
+  // 1b. Organic Monsoon Rain Puddle Mask & PBR Roughness Map
+  const [pudC, pudCtx] = makeCanvas(512, 512);
+  const [pudRoughC, pudRoughCtx] = makeCanvas(512, 512);
+  const [pudNormC, pudNormCtx] = makeCanvas(512, 512);
+
+  pudCtx.fillStyle = '#000000';
+  pudCtx.fillRect(0, 0, 512, 512);
+
+  pudRoughCtx.fillStyle = '#dfdfdf'; // Dry asphalt background roughness (0.88)
+  pudRoughCtx.fillRect(0, 0, 512, 512);
+
+  pudNormCtx.fillStyle = '#808080';
+  pudNormCtx.fillRect(0, 0, 512, 512);
+
+  // Wheel rut rain channels
+  const rutL = pudRoughCtx.createLinearGradient(80, 0, 160, 0);
+  rutL.addColorStop(0, 'rgba(110,110,110,0)');
+  rutL.addColorStop(0.5, 'rgba(80,80,80,0.65)');
+  rutL.addColorStop(1, 'rgba(110,110,110,0)');
+  pudRoughCtx.fillStyle = rutL;
+  pudRoughCtx.fillRect(80, 0, 80, 512);
+
+  const rutR = pudRoughCtx.createLinearGradient(340, 0, 420, 0);
+  rutR.addColorStop(0, 'rgba(110,110,110,0)');
+  rutR.addColorStop(0.5, 'rgba(80,80,80,0.65)');
+  rutR.addColorStop(1, 'rgba(110,110,110,0)');
+  pudRoughCtx.fillStyle = rutR;
+  pudRoughCtx.fillRect(340, 0, 80, 512);
+
+  // 5 organic puddle pools with natural meandering contours
+  const puddleSpecs = [
+    { cx: 128, cy: 110, rx: 56, ry: 38, rot: 0.25 },
+    { cx: 370, cy: 190, rx: 64, ry: 44, rot: -0.32 },
+    { cx: 240, cy: 320, rx: 78, ry: 42, rot: 0.12 },
+    { cx: 110, cy: 410, rx: 52, ry: 34, rot: -0.18 },
+    { cx: 390, cy: 440, rx: 62, ry: 38, rot: 0.22 },
+  ];
+
+  puddleSpecs.forEach(({ cx, cy, rx, ry, rot }) => {
+    // Damp perimeter ring
+    const dampGrad = pudRoughCtx.createRadialGradient(cx, cy, rx * 0.45, cx, cy, rx * 1.25);
+    dampGrad.addColorStop(0, 'rgba(15, 15, 15, 1.0)'); // mirror pool (0.06)
+    dampGrad.addColorStop(0.72, 'rgba(65, 65, 65, 0.85)'); // damp border (0.25)
+    dampGrad.addColorStop(1, 'rgba(223, 223, 223, 0.0)'); // dry road blend
+    pudRoughCtx.save();
+    pudRoughCtx.translate(cx, cy);
+    pudRoughCtx.rotate(rot);
+    pudRoughCtx.fillStyle = dampGrad;
+    pudRoughCtx.beginPath();
+    pudRoughCtx.ellipse(0, 0, rx * 1.2, ry * 1.2, 0, 0, Math.PI * 2);
+    pudRoughCtx.fill();
+    pudRoughCtx.restore();
+
+    // Puddle standing water mask
+    pudCtx.save();
+    pudCtx.translate(cx, cy);
+    pudCtx.rotate(rot);
+    const poolGrad = pudCtx.createRadialGradient(0, 0, rx * 0.2, 0, 0, rx);
+    poolGrad.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
+    poolGrad.addColorStop(0.75, 'rgba(230, 230, 230, 0.9)');
+    poolGrad.addColorStop(1, 'rgba(0, 0, 0, 0.0)');
+    pudCtx.fillStyle = poolGrad;
+    pudCtx.beginPath();
+    pudCtx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+    pudCtx.fill();
+    pudCtx.restore();
+
+    // Soft normal height for puddle rim
+    pudNormCtx.save();
+    pudNormCtx.translate(cx, cy);
+    pudNormCtx.rotate(rot);
+    const rimGrad = pudNormCtx.createRadialGradient(0, 0, rx * 0.7, 0, 0, rx * 1.05);
+    rimGrad.addColorStop(0, 'rgb(128, 128, 128)');
+    rimGrad.addColorStop(0.5, 'rgb(175, 175, 175)');
+    rimGrad.addColorStop(1, 'rgb(128, 128, 128)');
+    pudNormCtx.fillStyle = rimGrad;
+    pudNormCtx.beginPath();
+    pudNormCtx.ellipse(0, 0, rx * 1.05, ry * 1.05, 0, 0, Math.PI * 2);
+    pudNormCtx.fill();
+    pudNormCtx.restore();
+  });
+
+  const puddleMap = finalizeTexture(pudC, false, maxAniso, 1, 1);
+  const puddleRoughness = finalizeTexture(pudRoughC, false, maxAniso, 1, 1);
+  const puddleNormal = heightCanvasToNormalTexture(pudNormC, 1.85, maxAniso, 1, 1);
 
   // 2. Warm Weathered Dhaka Concrete Sidewalk Pavers + Bump Map
   const [swC, swCtx] = makeCanvas(256, 256);
@@ -573,6 +669,131 @@ export function createDhakaTextures(maxAniso: number): DhakaTextureSet {
   }
   const waterBumpMap = finalizeTexture(wbC, false, maxAniso, 22, 8);
 
+  // 5b2. High-Frequency Water Waves & Detail Cross-Ripples (Normal Maps for PBR River & Lakes)
+  const [wnC, wnCtx] = makeCanvas(256, 256);
+  wnCtx.fillStyle = '#808080';
+  wnCtx.fillRect(0, 0, 256, 256);
+  for (let y = 0; y < 256; y += 2) {
+    for (let x = 0; x < 256; x += 2) {
+      const w1 = Math.sin((x / 256) * Math.PI * 8 + (y / 256) * Math.PI * 4) * 0.55;
+      const w2 = Math.cos((y / 256) * Math.PI * 12 - (x / 256) * Math.PI * 6) * 0.45;
+      const val = Math.round(128 + (w1 + w2) * 55);
+      wnCtx.fillStyle = `rgb(${val},${val},${val})`;
+      wnCtx.fillRect(x, y, 2, 2);
+    }
+  }
+  const waterNormalMap = heightCanvasToNormalTexture(wnC, 2.2, maxAniso, 18, 6);
+
+  const [wdnC, wdnCtx] = makeCanvas(128, 128);
+  wdnCtx.fillStyle = '#808080';
+  wdnCtx.fillRect(0, 0, 128, 128);
+  for (let y = 0; y < 128; y += 2) {
+    for (let x = 0; x < 128; x += 2) {
+      const chop = Math.sin((x + y) * 0.35) * Math.cos((x - y) * 0.28);
+      const val = Math.round(128 + chop * 58);
+      wdnCtx.fillStyle = `rgb(${val},${val},${val})`;
+      wdnCtx.fillRect(x, y, 2, 2);
+    }
+  }
+  const waterDetailNormalMap = heightCanvasToNormalTexture(wdnC, 1.6, maxAniso, 36, 14);
+
+  // 5b3. Expanding Raindrop Splash Ground Impact Ripple
+  const [rsC, rsCtx] = makeCanvas(128, 128);
+  rsCtx.fillStyle = 'rgba(0, 0, 0, 0)';
+  rsCtx.fillRect(0, 0, 128, 128);
+  [18, 36, 54].forEach((radius, ri) => {
+    rsCtx.beginPath();
+    rsCtx.arc(64, 64, radius, 0, Math.PI * 2);
+    rsCtx.strokeStyle = `rgba(224, 242, 254, ${0.7 - ri * 0.22})`;
+    rsCtx.lineWidth = 3 - ri * 0.7;
+    rsCtx.stroke();
+  });
+  const rainSplashMap = finalizeTexture(rsC, true, maxAniso, 1, 1);
+
+  // 5b4. Tropical Coconut Palm Frond Texture
+  const [plC, plCtx] = makeCanvas(256, 128);
+  plCtx.clearRect(0, 0, 256, 128);
+  plCtx.strokeStyle = '#78350f';
+  plCtx.lineWidth = 4;
+  plCtx.beginPath();
+  plCtx.moveTo(8, 64);
+  plCtx.quadraticCurveTo(128, 58, 248, 64);
+  plCtx.stroke();
+  for (let x = 16; x < 240; x += 6) {
+    const len = Math.sin((x / 240) * Math.PI) * 44 + 6;
+    plCtx.strokeStyle = x % 12 === 0 ? '#15803d' : '#16a34a';
+    plCtx.lineWidth = 2.5;
+    plCtx.beginPath();
+    plCtx.moveTo(x, 63);
+    plCtx.lineTo(x + 12, 63 - len);
+    plCtx.stroke();
+    plCtx.beginPath();
+    plCtx.moveTo(x, 65);
+    plCtx.lineTo(x + 12, 65 + len);
+    plCtx.stroke();
+  }
+  const palmLeafMap = finalizeTexture(plC, true, maxAniso, 1, 1);
+
+  // 5b5. Krishnachura (Flame Tree) Blossom & Foliage Texture
+  const [kcC, kcCtx] = makeCanvas(256, 256);
+  kcCtx.clearRect(0, 0, 256, 256);
+  for (let i = 0; i < 480; i++) {
+    const fx = (i * 47) % 256;
+    const fy = (i * 79) % 256;
+    kcCtx.fillStyle = i % 2 === 0 ? 'rgba(34, 197, 94, 0.85)' : 'rgba(21, 128, 61, 0.9)';
+    kcCtx.beginPath();
+    kcCtx.ellipse(fx, fy, 8, 4, (i * 0.3) % Math.PI, 0, Math.PI * 2);
+    kcCtx.fill();
+  }
+  for (let i = 0; i < 160; i++) {
+    const bx = (i * 83 + 12) % 256;
+    const by = (i * 127 + 18) % 256;
+    kcCtx.fillStyle = i % 3 === 0 ? '#ef4444' : i % 3 === 1 ? '#f97316' : '#eab308';
+    kcCtx.beginPath();
+    kcCtx.arc(bx, by, 5 + (i % 4), 0, Math.PI * 2);
+    kcCtx.fill();
+  }
+  const krishnachuraMap = finalizeTexture(kcC, true, maxAniso, 1, 1);
+
+  // 5b6. High-Contrast Dhaka Zebra Crosswalk Road Marking
+  const [cwC, cwCtx] = makeCanvas(512, 128);
+  cwCtx.fillStyle = 'rgba(0,0,0,0)';
+  cwCtx.fillRect(0, 0, 512, 128);
+  for (let i = 0; i < 8; i++) {
+    const bx = 16 + i * 62;
+    cwCtx.fillStyle = '#f8fafc';
+    cwCtx.fillRect(bx, 6, 44, 116);
+    cwCtx.fillStyle = 'rgba(24, 28, 36, 0.18)';
+    cwCtx.fillRect(bx + 4, 32, 36, 64);
+  }
+  const crosswalkMap = finalizeTexture(cwC, true, maxAniso, 1, 1);
+
+  // 5b7. Dhaka WASA Drainage Manhole Cover Texture
+  const [mhC, mhCtx] = makeCanvas(256, 256);
+  mhCtx.fillStyle = 'rgba(0,0,0,0)';
+  mhCtx.fillRect(0, 0, 256, 256);
+  mhCtx.fillStyle = '#334155';
+  mhCtx.beginPath();
+  mhCtx.arc(128, 128, 118, 0, Math.PI * 2);
+  mhCtx.fill();
+  mhCtx.strokeStyle = '#1e293b';
+  mhCtx.lineWidth = 8;
+  mhCtx.stroke();
+  mhCtx.strokeStyle = '#475569';
+  mhCtx.lineWidth = 3;
+  for (let r = 24; r < 110; r += 20) {
+    mhCtx.beginPath();
+    mhCtx.arc(128, 128, r, 0, Math.PI * 2);
+    mhCtx.stroke();
+  }
+  for (let a = 0; a < Math.PI * 2; a += Math.PI / 6) {
+    mhCtx.beginPath();
+    mhCtx.moveTo(128 + Math.cos(a) * 20, 128 + Math.sin(a) * 20);
+    mhCtx.lineTo(128 + Math.cos(a) * 110, 128 + Math.sin(a) * 110);
+    mhCtx.stroke();
+  }
+  const manholeMap = finalizeTexture(mhC, true, maxAniso, 1, 1);
+
   // 5c. Soft Radial Streetlamp Glow Halo / Sodium Ground Pool Texture
   const [lhC, lhCtx] = makeCanvas(128, 128);
   const lhGrad = lhCtx.createRadialGradient(64, 64, 4, 64, 64, 62);
@@ -643,6 +864,9 @@ export function createDhakaTextures(maxAniso: number): DhakaTextureSet {
     asphaltBump,
     asphaltNormal,
     asphaltRoughness,
+    puddleMap,
+    puddleNormal,
+    puddleRoughness,
     sidewalkMap,
     sidewalkBump,
     sidewalkNormal,
@@ -661,6 +885,13 @@ export function createDhakaTextures(maxAniso: number): DhakaTextureSet {
     residentialMap,
     residentialEmissiveMap,
     waterBumpMap,
+    waterNormalMap,
+    waterDetailNormalMap,
+    rainSplashMap,
+    palmLeafMap,
+    krishnachuraMap,
+    crosswalkMap,
+    manholeMap,
     lampHaloMap,
     curbStripeMap,
     rickshawArtMap,
@@ -670,6 +901,9 @@ export function createDhakaTextures(maxAniso: number): DhakaTextureSet {
       asphaltBump.dispose();
       asphaltNormal.dispose();
       asphaltRoughness.dispose();
+      puddleMap.dispose();
+      puddleNormal.dispose();
+      puddleRoughness.dispose();
       sidewalkMap.dispose();
       sidewalkBump.dispose();
       sidewalkNormal.dispose();
@@ -688,6 +922,13 @@ export function createDhakaTextures(maxAniso: number): DhakaTextureSet {
       residentialMap.dispose();
       residentialEmissiveMap.dispose();
       waterBumpMap.dispose();
+      waterNormalMap.dispose();
+      waterDetailNormalMap.dispose();
+      rainSplashMap.dispose();
+      palmLeafMap.dispose();
+      krishnachuraMap.dispose();
+      crosswalkMap.dispose();
+      manholeMap.dispose();
       lampHaloMap.dispose();
       curbStripeMap.dispose();
       rickshawArtMap.dispose();

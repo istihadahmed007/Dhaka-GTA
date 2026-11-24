@@ -1,14 +1,16 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   GraphicsQualityPreset,
   HudSnapshot,
   OutfitId,
   OUTFIT_SPECS,
+  SafehouseId,
   TimePreset,
   WeaponId,
   WEAPON_SPECS,
   WeatherMode,
 } from '../game/types';
+import { SAFEHOUSE_SPECS } from '../game/worldData';
 import { OPEN_METEO_ATTRIBUTION } from '../api/openMeteoClient';
 import { BDAPIS_ATTRIBUTION } from '../api/bdapisClient';
 import { OSM_ATTRIBUTION_NOTE } from '../game/dhakaGeoData';
@@ -28,6 +30,15 @@ interface OverlaysProps {
   onShopBuy: (item: 'biriyani' | 'armor' | WeaponId) => void;
   onGarageService: (svc: 'repair' | 'clear_heat' | 'paint', color?: number) => void;
   onOutfitSelect: (id: OutfitId) => void;
+  onSaveGame?: () => void;
+  onLoadGame?: () => void;
+  onSafehouseAction?: (action: 'rest' | 'save' | 'purchase' | 'armory' | 'wardrobe', safehouseId?: SafehouseId) => void;
+  onRefuelAction?: (action: 'refuel' | 'jerrycan', stationId?: string) => void;
+  onVehicleUpgrade?: (option: 'engine' | 'brakes' | 'turbo' | 'spoiler' | 'tint' | 'neon' | 'jammer', val?: any) => void;
+  onUseItem?: (itemId: string) => void;
+  onDialogueOption?: (optionId: string) => void;
+  onConnectMultiplayer?: (serverUrl: string, callsign: string) => void;
+  onDisconnectMultiplayer?: () => void;
 }
 
 const PAINT_SWATCHES: Array<{ label: string; hex: number; css: string }> = [
@@ -54,7 +65,19 @@ export const Overlays: React.FC<OverlaysProps> = ({
   onShopBuy,
   onGarageService,
   onOutfitSelect,
+  onSaveGame,
+  onLoadGame,
+  onSafehouseAction,
+  onRefuelAction,
+  onVehicleUpgrade,
+  onUseItem,
+  onDialogueOption,
+  onConnectMultiplayer,
+  onDisconnectMultiplayer,
 }) => {
+  const [garageTab, setGarageTab] = useState<'service' | 'performance' | 'styling'>('service');
+  const [serverUrl, setServerUrl] = useState('ws://localhost:8080');
+  const [callsign, setCallsign] = useState('DhakaRider');
   // 1. PAUSE MODAL
   if (hud.phase === 'paused') {
     const lw = hud.liveWeather;
@@ -274,6 +297,44 @@ export const Overlays: React.FC<OverlaysProps> = ({
             <div className="mt-1 text-[10px] text-[#64748b]">{OSM_ATTRIBUTION_NOTE}</div>
           </div>
 
+          {/* Persistence Quick Actions */}
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              data-testid="pause-save-btn"
+              onClick={onSaveGame}
+              className="px-3 py-2 bg-[#1b2432] hover:bg-[#0f7a53] border border-[#34d399]/40 text-[#34d399] text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+            >
+              <span>💾</span>
+              <span>Save Progress</span>
+            </button>
+            <button
+              type="button"
+              data-testid="pause-load-btn"
+              onClick={onLoadGame}
+              className="px-3 py-2 bg-[#1b2432] hover:bg-[#334155] border border-[#f5d07a]/40 text-[#f5d07a] text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+            >
+              <span>📂</span>
+              <span>Load Saved Game</span>
+            </button>
+          </div>
+
+          {hud.multiplayerActive && onDisconnectMultiplayer && (
+            <div className="mt-3">
+              <button
+                type="button"
+                data-testid="pause-disconnect-mp"
+                onClick={() => {
+                  onDisconnectMultiplayer();
+                  onResume();
+                }}
+                className="w-full px-4 py-2.5 bg-[#7f1d1d] hover:bg-[#991b1b] border border-[#ef4444]/50 text-white font-display text-sm font-bold uppercase tracking-wider cursor-pointer"
+              >
+                Disconnect Multiplayer (Switch to Offline)
+              </button>
+            </div>
+          )}
+
           <div className="mt-5 flex flex-wrap gap-3">
             <button
               type="button"
@@ -387,9 +448,15 @@ export const Overlays: React.FC<OverlaysProps> = ({
             ? 'Dhaka Customs Garage'
             : hud.modal === 'shop'
               ? "Babu's Hardware and Gear"
-              : 'Character Wardrobe'
+              : hud.modal === 'safehouse'
+                ? 'Dhaka Safehouse'
+                : hud.modal === 'fuel_station'
+                  ? 'Dhaka Fuel Station'
+                  : hud.modal === 'dialogue'
+                    ? 'Conversation'
+                    : 'Character Wardrobe'
         }
-        className="w-full max-w-xl bg-[#111720] border-t-4 border-[#e6a135] border-x border-b border-white/15 p-6 shadow-[0_24px_60px_rgba(0,0,0,0.88)]"
+        className="w-full max-w-xl bg-[#111720] border-t-4 border-[#e6a135] border-x border-b border-white/15 p-6 shadow-[0_24px_60px_rgba(0,0,0,0.88)] max-h-[92vh] overflow-y-auto"
       >
         <div className="flex items-center justify-between border-b border-white/10 pb-3">
           <div>
@@ -398,7 +465,15 @@ export const Overlays: React.FC<OverlaysProps> = ({
                 ? 'DHAKA CUSTOMS GARAGE'
                 : hud.modal === 'shop'
                   ? "BABU'S HARDWARE & GEAR"
-                  : "TARIQ'S WARDROBE"}
+                  : hud.modal === 'safehouse'
+                    ? hud.safehouseName?.toUpperCase() ?? 'DHAKA SAFEHOUSE'
+                    : hud.modal === 'fuel_station'
+                      ? 'PADMA & MEGHNA FUEL TERMINAL'
+                      : hud.modal === 'dialogue'
+                        ? hud.activeConversation?.npcName.toUpperCase() ?? 'CONVERSATION'
+                        : hud.modal === 'multiplayer_lobby'
+                          ? 'DHAKA MULTIPLAYER LOBBY'
+                          : "TARIQ'S WARDROBE"}
             </h2>
             <p className="text-xs text-[#94a3b8]">
               Balance: <span className="font-bold text-[#34d399] tabular-nums">৳{hud.money.toLocaleString()}</span>
@@ -414,47 +489,330 @@ export const Overlays: React.FC<OverlaysProps> = ({
           </button>
         </div>
 
+        {/* GARAGE MODAL WITH TUNING TABS */}
         {hud.modal === 'garage' && (
           <div className="mt-4 flex flex-col gap-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* Tabs */}
+            <div className="flex border-b border-white/10 gap-2">
               <button
                 type="button"
-                onClick={() => onGarageService('repair')}
-                className="p-3.5 text-left bg-[#0b0f16] border border-white/15 hover:border-[#34d399] transition-colors cursor-pointer"
+                onClick={() => setGarageTab('service')}
+                className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer ${
+                  garageTab === 'service'
+                    ? 'border-b-2 border-[#e6a135] text-[#f5d07a]'
+                    : 'text-[#94a3b8] hover:text-[#f8f5ee]'
+                }`}
               >
-                <div className="font-display text-lg font-bold uppercase text-[#f8f5ee]">Full Engine & Body Repair</div>
-                <div className="text-xs text-[#94a3b8] mt-0.5">Restores active or nearby vehicle to 100% HP</div>
-                <div className="mt-2 font-display text-base font-bold text-[#34d399] tabular-nums">৳200</div>
+                Service & Repairs
               </button>
-
               <button
                 type="button"
-                onClick={() => onGarageService('clear_heat')}
-                className="p-3.5 text-left bg-[#0b0f16] border border-white/15 hover:border-[#f5d07a] transition-colors cursor-pointer"
+                onClick={() => setGarageTab('performance')}
+                className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer ${
+                  garageTab === 'performance'
+                    ? 'border-b-2 border-[#e6a135] text-[#f5d07a]'
+                    : 'text-[#94a3b8] hover:text-[#f8f5ee]'
+                }`}
               >
-                <div className="font-display text-lg font-bold uppercase text-[#f8f5ee]">Swap Plates & Clear Heat</div>
-                <div className="text-xs text-[#94a3b8] mt-0.5">Instantly wipes DMP Wanted Stars</div>
-                <div className="mt-2 font-display text-base font-bold text-[#f5d07a] tabular-nums">৳300</div>
+                Engine & Tuning
+              </button>
+              <button
+                type="button"
+                onClick={() => setGarageTab('styling')}
+                className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer ${
+                  garageTab === 'styling'
+                    ? 'border-b-2 border-[#e6a135] text-[#f5d07a]'
+                    : 'text-[#94a3b8] hover:text-[#f8f5ee]'
+                }`}
+              >
+                Custom Styling
               </button>
             </div>
 
-            <div>
-              <div className="text-xs font-bold uppercase tracking-wider text-[#94a3b8] mb-2">
-                Custom Dhaka Respray (৳150)
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {PAINT_SWATCHES.map((sw) => (
+            {garageTab === 'service' && (
+              <div className="flex flex-col gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <button
-                    key={sw.label}
                     type="button"
-                    onClick={() => onGarageService('paint', sw.hex)}
-                    className="flex items-center gap-2.5 p-2 bg-[#0b0f16] border border-white/12 hover:border-white/50 text-left cursor-pointer"
+                    onClick={() => onGarageService('repair')}
+                    className="p-3.5 text-left bg-[#0b0f16] border border-white/15 hover:border-[#34d399] transition-colors cursor-pointer"
                   >
-                    <span className="w-5 h-5 shrink-0 border border-white/30" style={{ backgroundColor: sw.css }} />
-                    <span className="text-xs font-semibold text-[#e2e8f0] leading-tight">{sw.label}</span>
+                    <div className="font-display text-lg font-bold uppercase text-[#f8f5ee]">Full Engine & Body Repair</div>
+                    <div className="text-xs text-[#94a3b8] mt-0.5">Restores active or nearby vehicle to 100% HP</div>
+                    <div className="mt-2 font-display text-base font-bold text-[#34d399] tabular-nums">৳200</div>
                   </button>
-                ))}
+
+                  <button
+                    type="button"
+                    onClick={() => onGarageService('clear_heat')}
+                    className="p-3.5 text-left bg-[#0b0f16] border border-white/15 hover:border-[#f5d07a] transition-colors cursor-pointer"
+                  >
+                    <div className="font-display text-lg font-bold uppercase text-[#f8f5ee]">Swap Plates & Clear Heat</div>
+                    <div className="text-xs text-[#94a3b8] mt-0.5">Instantly wipes DMP Wanted Stars</div>
+                    <div className="mt-2 font-display text-base font-bold text-[#f5d07a] tabular-nums">৳300</div>
+                  </button>
+                </div>
               </div>
+            )}
+
+            {garageTab === 'performance' && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => onVehicleUpgrade?.('engine')}
+                  className="p-3.5 text-left bg-[#0b0f16] border border-white/15 hover:border-[#34d399] transition-colors cursor-pointer"
+                >
+                  <div className="font-display text-lg font-bold uppercase text-[#f8f5ee]">Stage Engine ECU Tuning</div>
+                  <div className="text-xs text-[#94a3b8] mt-0.5">+12% Torque & +5% Top Speed per stage (Stages 1-3)</div>
+                  <div className="mt-2 font-display text-base font-bold text-[#34d399] tabular-nums">৳800 - ৳2,500</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onVehicleUpgrade?.('brakes')}
+                  className="p-3.5 text-left bg-[#0b0f16] border border-white/15 hover:border-[#34d399] transition-colors cursor-pointer"
+                >
+                  <div className="font-display text-lg font-bold uppercase text-[#f8f5ee]">Ceramic Ventilated Brakes</div>
+                  <div className="text-xs text-[#94a3b8] mt-0.5">+25% Stopping power & reduced drift slip</div>
+                  <div className="mt-2 font-display text-base font-bold text-[#34d399] tabular-nums">৳450 - ৳900</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onVehicleUpgrade?.('turbo')}
+                  className="p-3.5 text-left bg-[#0b0f16] border border-white/15 hover:border-[#38bdf8] transition-colors cursor-pointer"
+                >
+                  <div className="font-display text-lg font-bold uppercase text-[#f8f5ee]">Garrett Twin-Scroll Turbo</div>
+                  <div className="text-xs text-[#94a3b8] mt-0.5">+15% Turbo spool power boost</div>
+                  <div className="mt-2 font-display text-base font-bold text-[#38bdf8] tabular-nums">৳1,800</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onVehicleUpgrade?.('jammer')}
+                  className="p-3.5 text-left bg-[#0b0f16] border border-white/15 hover:border-[#f5d07a] transition-colors cursor-pointer"
+                >
+                  <div className="font-display text-lg font-bold uppercase text-[#f8f5ee]">DMP Digital Plate Jammer</div>
+                  <div className="text-xs text-[#94a3b8] mt-0.5">Scrambles automatic police radar detection</div>
+                  <div className="mt-2 font-display text-base font-bold text-[#f5d07a] tabular-nums">৳1,200</div>
+                </button>
+              </div>
+            )}
+
+            {garageTab === 'styling' && (
+              <div className="flex flex-col gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => onVehicleUpgrade?.('spoiler')}
+                    className="p-3.5 text-left bg-[#0b0f16] border border-white/15 hover:border-[#38bdf8] transition-colors cursor-pointer"
+                  >
+                    <div className="font-display text-lg font-bold uppercase text-[#f8f5ee]">Carbon Aero Spoiler</div>
+                    <div className="text-xs text-[#94a3b8] mt-0.5">+25% High-speed downforce & rear tire stability</div>
+                    <div className="mt-2 font-display text-base font-bold text-[#38bdf8] tabular-nums">৳700</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => onVehicleUpgrade?.('tint')}
+                    className="p-3.5 text-left bg-[#0b0f16] border border-white/15 hover:border-[#34d399] transition-colors cursor-pointer"
+                  >
+                    <div className="font-display text-lg font-bold uppercase text-[#f8f5ee]">Ceramic Privacy Window Tint</div>
+                    <div className="text-xs text-[#94a3b8] mt-0.5">5% Limo darkness shade</div>
+                    <div className="mt-2 font-display text-base font-bold text-[#34d399] tabular-nums">৳350</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => onVehicleUpgrade?.('neon', 0x00f3ff)}
+                    className="p-3.5 text-left bg-[#0b0f16] border border-white/15 hover:border-[#38bdf8] transition-colors cursor-pointer"
+                  >
+                    <div className="font-display text-lg font-bold uppercase text-[#f8f5ee]">Cyber Neon Underglow</div>
+                    <div className="text-xs text-[#94a3b8] mt-0.5">Electric cyan under-chassis illumination</div>
+                    <div className="mt-2 font-display text-base font-bold text-[#38bdf8] tabular-nums">৳500</div>
+                  </button>
+                </div>
+
+                <div>
+                  <div className="text-xs font-bold uppercase tracking-wider text-[#94a3b8] mb-2">
+                    Custom Dhaka Respray (৳150)
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {PAINT_SWATCHES.map((sw) => (
+                      <button
+                        key={sw.label}
+                        type="button"
+                        onClick={() => onGarageService('paint', sw.hex)}
+                        className="flex items-center gap-2.5 p-2 bg-[#0b0f16] border border-white/12 hover:border-white/50 text-left cursor-pointer"
+                      >
+                        <span className="w-5 h-5 shrink-0 border border-white/30" style={{ backgroundColor: sw.css }} />
+                        <span className="text-xs font-semibold text-[#e2e8f0] leading-tight">{sw.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* SAFEHOUSE MODAL */}
+        {hud.modal === 'safehouse' && (
+          <div className="mt-4 flex flex-col gap-4">
+            {(() => {
+              const safehouseId = (hud.unlockedSafehouses[0] ?? 'old_dhaka_rooftop') as SafehouseId;
+              const spec = SAFEHOUSE_SPECS.find((s) => s.id === safehouseId);
+              const isOwned = hud.unlockedSafehouses.includes(safehouseId);
+              return (
+                <div>
+                  <div className="bg-[#0b0f16] p-4 border border-white/15">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <div className="font-display text-xl font-bold uppercase text-[#f5d07a]">{spec?.name}</div>
+                      <div className="font-bangla text-sm text-[#f5f2eb]">{spec?.banglaName}</div>
+                    </div>
+                    <p className="text-xs text-[#cbd5e1] mt-1">{spec?.description}</p>
+                    <div className="mt-2 text-xs font-bold uppercase text-[#34d399]">
+                      Status: {isOwned ? 'Deed Owned · Full Access' : `Unclaimed Deed (৳${spec?.price})`}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {!isOwned ? (
+                      <button
+                        type="button"
+                        onClick={() => onSafehouseAction?.('purchase', safehouseId)}
+                        className="p-3.5 text-left bg-[#0f7a53] hover:bg-[#149465] text-[#f8f5ee] border border-[#34d399] transition-colors cursor-pointer"
+                      >
+                        <div className="font-display text-lg font-bold uppercase">Purchase Property Deed</div>
+                        <div className="text-xs text-[#d1fae5] mt-0.5">Unlock resting, armory and garage bay</div>
+                        <div className="mt-2 font-display text-base font-bold text-[#fef08a] tabular-nums">
+                          ৳{spec?.price}
+                        </div>
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => onSafehouseAction?.('rest', safehouseId)}
+                          className="p-3.5 text-left bg-[#0b0f16] border border-white/15 hover:border-[#34d399] transition-colors cursor-pointer"
+                        >
+                          <div className="font-display text-lg font-bold uppercase text-[#f8f5ee]">Rest & Sleep (6h)</div>
+                          <div className="text-xs text-[#94a3b8] mt-0.5">Skips 6 hours, restores 100% HP & Stamina</div>
+                          <div className="mt-2 text-xs font-bold text-[#34d399]">Free · Safehouse Perk</div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => onSafehouseAction?.('armory', safehouseId)}
+                          className="p-3.5 text-left bg-[#0b0f16] border border-white/15 hover:border-[#38bdf8] transition-colors cursor-pointer"
+                        >
+                          <div className="font-display text-lg font-bold uppercase text-[#f8f5ee]">Safehouse Armory</div>
+                          <div className="text-xs text-[#94a3b8] mt-0.5">Fully restock reserve ammunition</div>
+                          <div className="mt-2 text-xs font-bold text-[#38bdf8]">Restock Free</div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => onSafehouseAction?.('save', safehouseId)}
+                          className="p-3.5 text-left bg-[#0b0f16] border border-white/15 hover:border-[#f5d07a] transition-colors cursor-pointer"
+                        >
+                          <div className="font-display text-lg font-bold uppercase text-[#f8f5ee]">Save Progress</div>
+                          <div className="text-xs text-[#94a3b8] mt-0.5">Store mission, money & gear to browser save</div>
+                          <div className="mt-2 text-xs font-bold text-[#f5d07a]">Cloud Sync</div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => onSafehouseAction?.('wardrobe', safehouseId)}
+                          className="p-3.5 text-left bg-[#0b0f16] border border-white/15 hover:border-white/50 transition-colors cursor-pointer"
+                        >
+                          <div className="font-display text-lg font-bold uppercase text-[#f8f5ee]">Wardrobe Closet</div>
+                          <div className="text-xs text-[#94a3b8] mt-0.5">Change outfit style</div>
+                          <div className="mt-2 text-xs font-bold text-[#cbd5e1]">Change Clothes</div>
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
+        {/* FUEL STATION MODAL */}
+        {hud.modal === 'fuel_station' && (
+          <div className="mt-4 flex flex-col gap-4">
+            <div className="bg-[#0b0f16] p-4 border border-white/15">
+              <div className="flex items-baseline justify-between gap-2">
+                <div className="font-display text-xl font-bold uppercase text-[#38bdf8]">Dhaka Fuel Terminal</div>
+                <div className="font-bangla text-sm text-[#f5d07a]">জ্বালানি স্টেশন</div>
+              </div>
+              <p className="text-xs text-[#cbd5e1] mt-1">High-octane gasoline, diesel and CNG refueling service.</p>
+              <div className="mt-2 text-xs font-bold uppercase text-[#38bdf8]">
+                Current Tank: <span className="tabular-nums">{hud.fuel}%</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => onRefuelAction?.('refuel')}
+                className="p-3.5 text-left bg-[#0b0f16] border border-white/15 hover:border-[#38bdf8] transition-colors cursor-pointer"
+              >
+                <div className="font-display text-lg font-bold uppercase text-[#f8f5ee]">Fill Tank to 100%</div>
+                <div className="text-xs text-[#94a3b8] mt-0.5">Refills full tank for active vehicle or boat</div>
+                <div className="mt-2 font-display text-base font-bold text-[#38bdf8] tabular-nums">৳1.5 / Unit</div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onRefuelAction?.('jerrycan')}
+                className="p-3.5 text-left bg-[#0b0f16] border border-white/15 hover:border-[#f5d07a] transition-colors cursor-pointer"
+              >
+                <div className="font-display text-lg font-bold uppercase text-[#f8f5ee]">Emergency Jerrycan (10L)</div>
+                <div className="text-xs text-[#94a3b8] mt-0.5">Portable fuel canister (+35% tank anywhere)</div>
+                <div className="mt-2 font-display text-base font-bold text-[#f5d07a] tabular-nums">৳250</div>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* INTERACTIVE NPC CONVERSATION MODAL */}
+        {hud.modal === 'dialogue' && hud.activeConversation && (
+          <div className="mt-4 flex flex-col gap-4">
+            <div className="bg-[#0b0f16] p-4 border border-white/15">
+              <div className="flex items-baseline justify-between gap-2">
+                <div className="font-display text-xl font-bold uppercase text-[#f5d07a]">
+                  {hud.activeConversation.npcName}
+                </div>
+                <div className="font-bangla text-sm text-[#f5f2eb]">{hud.activeConversation.npcBanglaName}</div>
+              </div>
+              <div className="text-xs font-bold text-[#94a3b8] uppercase">{hud.activeConversation.role}</div>
+              <div className="mt-3 bg-[#111720] p-3 border-l-2 border-[#e6a135]">
+                <div className="font-bangla text-base text-[#fef08a] leading-relaxed">
+                  "{hud.activeConversation.greetingBangla}"
+                </div>
+                <div className="text-xs text-[#cbd5e1] mt-1 italic">
+                  "{hud.activeConversation.greetingEnglish}"
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <div className="text-xs font-bold uppercase tracking-wider text-[#94a3b8]">Select Response:</div>
+              {hud.activeConversation.options.map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => onDialogueOption?.(opt.id)}
+                  className="p-3 text-left bg-[#0b0f16] border border-white/15 hover:border-[#f5d07a] hover:bg-[#1b2432] transition-colors cursor-pointer"
+                >
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="font-bangla text-sm font-semibold text-[#f5d07a]">{opt.banglaLabel}</span>
+                  </div>
+                  <div className="text-xs text-[#e2e8f0] mt-0.5">{opt.label}</div>
+                </button>
+              ))}
             </div>
           </div>
         )}
@@ -537,6 +895,93 @@ export const Overlays: React.FC<OverlaysProps> = ({
                 </button>
               );
             })}
+          </div>
+        )}
+
+        {hud.modal === 'multiplayer_lobby' && (
+          <div className="mt-4 flex flex-col gap-4">
+            <div className="bg-[#0b0f16] p-4 border border-white/15">
+              <div className="flex items-center justify-between border-b border-white/10 pb-2 mb-3">
+                <span className="text-xs font-bold uppercase tracking-wider text-[#94a3b8]">Connection Status</span>
+                <span
+                  data-testid="mp-status-pill"
+                  className={`px-2 py-0.5 text-xs font-extrabold uppercase ${
+                    hud.multiplayerActive ? 'bg-[#0f7a53] text-[#34d399]' : 'bg-[#ef4444]/20 text-[#f87171]'
+                  }`}
+                >
+                  {hud.multiplayerActive ? `● ONLINE (${hud.multiplayerPing}ms)` : '○ OFFLINE (Single Player)'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                <div>
+                  <label className="block text-[11px] font-bold uppercase text-[#94a3b8] mb-1">Server WebSocket URL</label>
+                  <input
+                    type="text"
+                    data-testid="mp-url-input"
+                    value={serverUrl}
+                    onChange={(e) => setServerUrl(e.target.value)}
+                    disabled={hud.multiplayerActive}
+                    className="w-full bg-[#111720] border border-white/20 px-3 py-1.5 text-sm text-[#f8f5ee] focus:border-[#e6a135] focus:outline-none"
+                    placeholder="ws://localhost:8080"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold uppercase text-[#94a3b8] mb-1">Callsign / Player Name</label>
+                  <input
+                    type="text"
+                    data-testid="mp-name-input"
+                    value={callsign}
+                    onChange={(e) => setCallsign(e.target.value)}
+                    disabled={hud.multiplayerActive}
+                    className="w-full bg-[#111720] border border-white/20 px-3 py-1.5 text-sm text-[#f8f5ee] focus:border-[#e6a135] focus:outline-none"
+                    placeholder="DhakaRider"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                {hud.multiplayerActive ? (
+                  <button
+                    type="button"
+                    data-testid="mp-disconnect-btn"
+                    onClick={() => onDisconnectMultiplayer?.()}
+                    className="px-5 py-2 bg-[#b91c1c] hover:bg-[#dc2626] text-white font-display text-sm font-bold uppercase tracking-wider cursor-pointer"
+                  >
+                    Disconnect from Server
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    data-testid="mp-connect-btn"
+                    onClick={() => onConnectMultiplayer?.(serverUrl, callsign)}
+                    className="px-6 py-2 bg-[#0f7a53] hover:bg-[#149465] text-[#f8fafc] font-display text-sm font-bold uppercase tracking-wider cursor-pointer"
+                  >
+                    Connect to Server
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-[#0b0f16] p-4 border border-white/15">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-[#94a3b8]">Live City Roster</span>
+                <span className="text-xs font-bold text-[#f5d07a] tabular-nums">{hud.multiplayerPlayerCount} / 16 Players</span>
+              </div>
+              <p className="text-xs text-[#94a3b8] leading-relaxed mb-3">
+                Server-authoritative 20 Hz simulation with client-side prediction and hermite interpolation. Money, vehicle ownership, and combat damage are verified server-side.
+              </p>
+              {hud.multiplayerKillfeed.length > 0 && (
+                <div className="mt-2 flex flex-col gap-1 border-t border-white/10 pt-2">
+                  <div className="text-[10px] font-bold uppercase text-[#94a3b8]">Recent Combat Events:</div>
+                  {hud.multiplayerKillfeed.map((k) => (
+                    <div key={k.id} className="text-xs text-[#ef4444] font-medium font-mono">
+                      ⚔ {k.text}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

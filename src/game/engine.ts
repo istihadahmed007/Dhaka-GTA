@@ -8,14 +8,22 @@ import {
   GraphicsQualityPreset,
   HudSnapshot,
   InteractModalKind,
+  InventoryItem,
   LiveWeatherHudState,
   MinimapBlip,
   NpcState,
   OutfitId,
   PlayerState,
   RegionalPlacesHudState,
+  SafehouseId,
+  SafehouseSpec,
+  DhakaSaveGameData,
   SideFareState,
+  SideMissionKind,
+  SideMissionState,
+  InteractiveNpcConversation,
   TimePreset,
+  VehicleCustomization,
   VehicleKind,
   VehicleState,
   VEHICLE_SPECS,
@@ -27,27 +35,40 @@ import {
   addWantedHeat,
   applyGarageService,
   applyPlayerDamage,
+  applyVehicleCustomization,
   buyShopItem,
   createInitialPlayerState,
   equipOrBuyOutfit,
   formatDhakaTime,
+  purchaseSafehouse,
+  refuelVehicle,
   resolveCircleCollisions,
+  restAtSafehouse,
   stepVehicleKinematics,
   tickWantedCooldown,
+  useInventoryItem,
 } from './physics';
 import {
+  AVAILABLE_SIDE_MISSIONS,
   buildStaticColliders,
   DISTRICT_META,
   FARE_DESTINATIONS,
   getDistrictAt,
   INITIAL_VEHICLES,
+  INTERACTIVE_NPCS,
   POIS,
   RIVER_Z_START,
   ROAD_SEGMENTS,
+  SAFEHOUSE_SPECS,
   STORY_MISSIONS,
   TRAFFIC_ROUTES,
   WORLD_HALF_SIZE,
 } from './worldData';
+import {
+  hasDhakaSaveGame,
+  loadDhakaGame,
+  saveDhakaGame,
+} from './saveSystem';
 import { getNearestStreetCorridor } from './dhakaGeoData';
 import { fetchDhakaLiveWeather, OPEN_METEO_CACHE_TTL_MS } from '../api/openMeteoClient';
 import { FALLBACK_DHAKA_REGIONAL_PLACES, fetchDhakaRegionalPlaces } from '../api/bdapisClient';
@@ -63,8 +84,41 @@ import {
 } from './models';
 import { buildDhakaWorld, WorldVisualHandles } from './worldBuilder';
 import { DhakaAudioEngine } from './audio';
-import { GraphicsQualityConfig, resolveGraphicsQualityConfig } from './graphicsQuality';
-import { DhakaCharacterGlbTemplate, loadDhakaCharacterTemplate } from './assetLoader';
+import { GraphicsQualityConfig, isMobileDevice, resolveGraphicsQualityConfig } from './graphicsQuality';
+import {
+  DhakaCharacterGlbTemplate,
+  DhakaLandmarkGlbTemplate,
+  DhakaSedanGlbTemplate,
+  getAssetUrl,
+  loadDhakaCharacterTemplate,
+  loadDhakaLandmarkTemplate,
+  loadDhakaSedanTemplate,
+} from './assetLoader';
+import {
+  createTrafficLightVisuals,
+  spawnTrafficVehicle,
+  TrafficLightHandles,
+  updateLaneAwareTrafficVehicle,
+} from './trafficSystem';
+import {
+  updateIntelligentPedestrian,
+  updatePedestrianAnimator,
+} from './pedestrianSystem';
+import {
+  isWatercraftKind,
+  BURIGANGA_WATER_LEVEL,
+  BURIGANGA_MIN_Z,
+  BURIGANGA_MAX_Z,
+  RIVER_DOCKS,
+  RiverDockBerth,
+  getRiverWaveSample,
+  isPointInBurigangaWater,
+  getNearestRiverDock,
+  dockWatercraftAtBerth,
+} from './waterSystem';
+import { NetworkClient } from './multiplayer/networkClient';
+import { RemotePlayerRig } from './multiplayer/remotePlayerRig';
+import { NetPlayerState, SCombatEventMsg } from './multiplayer/protocol';
 
 interface ParticleSlot {
   active: boolean;
@@ -114,7 +168,12 @@ export class DhakaGameEngine {
   private isSoftwareGl: boolean;
   private graphicsQuality: GraphicsQualityPreset;
   private qualityConfig: GraphicsQualityConfig;
+  private frameCount = 0;
+  private fpsWindowStartMs = performance.now();
+  private lowFpsCounter = 0;
   private characterTemplate: DhakaCharacterGlbTemplate | null = null;
+  private sedanTemplate: DhakaSedanGlbTemplate | null = null;
+  private landmarkTemplate: DhakaLandmarkGlbTemplate | null = null;
 
   private renderer: THREE.WebGLRenderer;
   private scene: THREE.Scene;
@@ -133,6 +192,8 @@ export class DhakaGameEngine {
 
   private vehicles: VehicleState[] = [];
   private vehicleRigs = new Map<string, VehicleRig>();
+  private trafficCounter = 0;
+  private trafficLights: TrafficLightHandles;
 
   private npcs: NpcState[] = [];
   private npcRigs = new Map<string, HumanoidRig>();
@@ -160,6 +221,10 @@ export class DhakaGameEngine {
     timer: 0,
     reward: 0,
   };
+  private activeSideMission: SideMissionState | null = null;
+  private activeConversation: InteractiveNpcConversation | null = null;
+  private activeSafehouseId: SafehouseId | null = null;
+  private hasSaveGame = false;
   private dialogue: ActiveDialogue | null = null;
   private toastMsg: string | null = null;
   private toastTimer = 0;
@@ -170,8 +235,18 @@ export class DhakaGameEngine {
   // Environment & Weather
   private timeOfDay = 15.8; // Golden late-afternoon Dhaka light on boot
   private weather: WeatherMode = 'clear';
+  private roadWetness = 0.0; // Dynamic monsoon puddle accumulation & drying
+  private splashAnimTimer = 0.0;
   private lightningTimer = 6;
   private lightningFlash = 0;
+
+  // Authoritative Multiplayer
+  private netClient: NetworkClient | null = null;
+  private remotePlayerRigs = new Map<string, RemotePlayerRig>();
+  private killfeed: Array<{ id: string; text: string; timer: number }> = [];
+  private chatMessages: Array<{ id: string; sender: string; text: string; isSystem: boolean }> = [];
+  private multiplayerPing = 0;
+  private multiplayerPlayerCount = 1;
 
   // Optional API-backed features (strictly opt-in; never block or freeze gameplay)
   private liveWeatherState: LiveWeatherHudState = {
@@ -238,7 +313,8 @@ export class DhakaGameEngine {
       }
     })();
 
-    this.graphicsQuality = this.isSoftwareGl ? 'low' : 'high';
+    const isMobile = isMobileDevice();
+    this.graphicsQuality = this.isSoftwareGl ? 'low' : isMobile ? 'medium' : 'high';
     this.qualityConfig = resolveGraphicsQualityConfig(
       this.graphicsQuality,
       this.isSoftwareGl,
@@ -336,9 +412,14 @@ export class DhakaGameEngine {
     this.playerRig.group.rotation.y = this.player.heading;
     this.scene.add(this.playerRig.group);
 
+    this.trafficLights = createTrafficLightVisuals();
+    this.scene.add(this.trafficLights.group);
+
     this.spawnInitialEntities();
     this.applyEnvironmentLighting(0);
     void this.loadCharacterGlbAsync();
+    void this.loadSedanGlbAsync();
+    void this.loadLandmarkGlbAsync();
 
     if (!this.isSoftwareGl) {
       this.renderer.compile(this.scene, this.camera);
@@ -347,6 +428,8 @@ export class DhakaGameEngine {
     this.bindEvents();
     this.resizeObserver = new ResizeObserver(() => this.handleResize());
     this.resizeObserver.observe(this.container);
+
+    this.hasSaveGame = hasDhakaSaveGame();
 
     // Check ?autostart=1 query param
     const params = new URLSearchParams(window.location.search);
@@ -395,6 +478,9 @@ export class DhakaGameEngine {
         honkTimer: 0,
         sirenOn: false,
         damagedSmoke: false,
+        fuel: 100,
+        maxFuel: 100,
+        fuelType: vSpawn.kind === 'cng' ? 'cng' : vSpawn.kind === 'truck' || vSpawn.kind === 'bus' || vSpawn.kind === 'launch' ? 'diesel' : 'petrol',
       };
       this.vehicles.push(state);
       const rig = createVehicleRig(state.kind, state.color, this.textures, !this.isSoftwareGl);
@@ -538,7 +624,7 @@ export class DhakaGameEngine {
   }
 
   private async loadCharacterGlbAsync(): Promise<void> {
-    const template = await loadDhakaCharacterTemplate('/models/dhaka_character.glb');
+    const template = await loadDhakaCharacterTemplate(getAssetUrl('models/dhaka_character.glb'));
     if (this.disposed || !template) return;
     this.characterTemplate = template;
 
@@ -547,14 +633,131 @@ export class DhakaGameEngine {
     setHumanoidOutfit(this.playerRig, this.player.outfit);
     setHumanoidWeaponMesh(this.playerRig, this.player.weapon);
 
+    this.remotePlayerRigs.forEach((r) => {
+      upgradeHumanoidRigToGlb(r.rig, template, this.textures, !this.isSoftwareGl);
+    });
+
     this.npcRigs.forEach((rig) => {
       upgradeHumanoidRigToGlb(rig, template, this.textures, !this.isSoftwareGl);
     });
     this.emitHud();
   }
 
+  private async loadSedanGlbAsync(): Promise<void> {
+    const template = await loadDhakaSedanTemplate(getAssetUrl('models/dhaka_sedan.glb'));
+    if (this.disposed || !template) return;
+    this.sedanTemplate = template;
+
+    // Smoothly upgrade any active procedural sedans to the high-detail GLB model
+    for (const v of this.vehicles) {
+      if (v.kind === 'sedan') {
+        const oldRig = this.vehicleRigs.get(v.id);
+        if (oldRig && !oldRig.isGlb) {
+          this.scene.remove(oldRig.group);
+          const newRig = createVehicleRig(v.kind, v.color, this.textures, !this.isSoftwareGl);
+          newRig.group.position.set(v.x, v.y, v.z);
+          newRig.group.rotation.y = v.heading;
+          this.scene.add(newRig.group);
+          this.vehicleRigs.set(v.id, newRig);
+        }
+      }
+    }
+  }
+
+  private async loadLandmarkGlbAsync(): Promise<void> {
+    const template = await loadDhakaLandmarkTemplate(getAssetUrl('models/dhaka_landmark_ahsan_manzil.glb'));
+    if (this.disposed || !template) return;
+    this.landmarkTemplate = template;
+  }
+
+  public alertNearbyPedestriansOfDanger(x: number, z: number, radius = 35): void {
+    for (const n of this.npcs) {
+      if (n.role === 'civilian' && Math.hypot(n.x - x, n.z - z) < radius) {
+        n.dangerSourceX = x;
+        n.dangerSourceZ = z;
+      }
+    }
+  }
+
+  private spawnStreamingPedestrian(): NpcState | null {
+    const angle = Math.random() * Math.PI * 2;
+    const dist = 32 + Math.random() * 36;
+    const px = this.player.x + Math.sin(angle) * dist;
+    const pz = this.player.z + Math.cos(angle) * dist;
+
+    if (Math.abs(px) > WORLD_HALF_SIZE - 25 || pz > RIVER_Z_START - 12 || pz < -(WORLD_HALF_SIZE - 25)) {
+      return null;
+    }
+    const safe = resolveCircleCollisions(px, pz, 0.5, this.colliders);
+
+    const pedPalette = [0xc0392b, 0x16a085, 0xd4a017, 0x2980b9, 0x8e44ad, 0xe67e22, 0xf1f5f9, 0x1f6f54, 0x0f766e];
+    const shirt = pedPalette[Math.floor(Math.random() * pedPalette.length)];
+    const pants = Math.random() < 0.5 ? 0x1e293b : 0x475569;
+    const accent = pedPalette[Math.floor(Math.random() * pedPalette.length)];
+
+    return this.spawnNpc({
+      role: 'civilian',
+      policy: 'chaser',
+      x: safe.x,
+      z: safe.z,
+      shirtColor: shirt,
+      pantsColor: pants,
+      accentColor: accent,
+      hp: 45,
+    });
+  }
+
+  private spawnStreamingVehicle(): VehicleState | null {
+    const routeIdx = Math.floor(Math.random() * TRAFFIC_ROUTES.length);
+    const route = TRAFFIC_ROUTES[routeIdx];
+    let bestWpIdx = -1;
+    let bestDistScore = 999;
+    for (let i = 0; i < route.length; i++) {
+      const d = Math.hypot(route[i].x - this.player.x, route[i].z - this.player.z);
+      if (d >= 40 && d <= 95) {
+        const score = Math.abs(d - 65);
+        if (score < bestDistScore) {
+          bestDistScore = score;
+          bestWpIdx = i;
+        }
+      }
+    }
+    if (bestWpIdx === -1) return null;
+
+    const kindWeights: VehicleKind[] = [
+      'cng', 'cng', 'cng',
+      'rickshaw', 'rickshaw', 'rickshaw',
+      'sedan', 'sedan',
+      'bike', 'bike',
+      'bus',
+      'truck',
+    ];
+    const kind = kindWeights[Math.floor(Math.random() * kindWeights.length)];
+    const id = `t_stream_${++this.trafficCounter}`;
+    const v = spawnTrafficVehicle(id, kind, routeIdx, bestWpIdx, 'traffic');
+
+    for (const other of this.vehicles) {
+      if (Math.hypot(other.x - v.x, other.z - v.z) < 8.0) return null;
+    }
+
+    this.vehicles.push(v);
+    const rig = createVehicleRig(v.kind, v.color, this.textures, !this.isSoftwareGl);
+    rig.group.position.set(v.x, 0, v.z);
+    rig.group.rotation.y = v.heading;
+    this.scene.add(rig.group);
+    this.vehicleRigs.set(v.id, rig);
+    return v;
+  }
+
   private applyQualityHandles(): void {
     const cfg = this.qualityConfig;
+    if (this.world.chunkManager && cfg.lodDistances) {
+      this.world.chunkManager.setLodDistances(
+        cfg.lodDistances.near,
+        cfg.lodDistances.med,
+        cfg.lodDistances.far,
+      );
+    }
     this.world.haloInst.visible = cfg.lampHalosEnabled;
     this.world.poolInst.visible = cfg.lampHalosEnabled;
     const rainCount = Math.max(120, Math.round(this.world.rainMaxCount * cfg.rainDensityScale));
@@ -590,6 +793,140 @@ export class DhakaGameEngine {
       );
     }
     this.emitHud();
+  }
+
+  public continueGame(): boolean {
+    this.audio.unlock();
+    const ok = this.loadGame();
+    if (ok) {
+      this.phase = 'playing';
+      this.modal = 'none';
+      document.body.dataset.state = 'playing';
+      this.clearInputs();
+      this.camYaw = 0;
+      this.camPitch = 0.28;
+      this.camPos.set(this.player.x, 4.4, this.player.z + 8.5);
+      this.camTarget.set(this.player.x, 1.8, this.player.z - 6);
+      this.camera.position.copy(this.camPos);
+      this.camera.lookAt(this.camTarget);
+      this.emitHud();
+      return true;
+    }
+    this.startGame();
+    return false;
+  }
+
+  public saveGame(): boolean {
+    const veh = this.player.vehicleId ? this.vehicles.find((v) => v.id === this.player.vehicleId) : null;
+    const savePayload: DhakaSaveGameData = {
+      version: 1,
+      timestamp: Date.now(),
+      player: {
+        x: this.player.x,
+        y: this.player.y ?? 0,
+        z: this.player.z,
+        heading: this.player.heading,
+        hp: this.player.hp,
+        armor: this.player.armor,
+        stamina: this.player.stamina,
+        money: this.player.money,
+        wantedLevel: this.player.wantedLevel,
+        weapon: this.player.weapon,
+        unlockedWeapons: [...this.player.unlockedWeapons],
+        ammo: { ...this.player.ammo },
+        outfit: this.player.outfit,
+        unlockedOutfits: [...this.player.unlockedOutfits],
+        unlockedSafehouses: [...this.player.unlockedSafehouses],
+        inventory: this.player.inventory.map((i) => ({ ...i })),
+      },
+      missions: {
+        missionIdx: this.missionIdx,
+        stepIdx: this.stepIdx,
+        missionsCompleted: this.player.missionsCompleted,
+        faresCompleted: this.player.faresCompleted,
+        bountiesCompleted: this.player.bountiesCompleted ?? 0,
+        carTheftsCompleted: this.player.carTheftsCompleted ?? 0,
+      },
+      world: {
+        timeOfDay: this.timeOfDay,
+        weather: this.weather,
+        playTimeSec: this.playTimeSec,
+      },
+      ownedVehicles: veh
+        ? [
+            {
+              kind: veh.kind,
+              color: veh.color,
+              customization: veh.customization ?? {
+                engineStage: 0,
+                brakesStage: 0,
+                hasTurbo: false,
+                hasSpoiler: false,
+                tintLevel: 0,
+                neonColor: null,
+                plateJammer: false,
+              },
+            },
+          ]
+        : [],
+    };
+
+    const ok = saveDhakaGame(savePayload);
+    if (ok) {
+      this.hasSaveGame = true;
+    }
+    return ok;
+  }
+
+  public loadGame(): boolean {
+    const loaded = loadDhakaGame();
+    if (!loaded) return false;
+
+    this.playTimeSec = loaded.world.playTimeSec;
+    this.player.x = loaded.player.x;
+    this.player.y = loaded.player.y ?? 0;
+    this.player.z = loaded.player.z;
+    this.player.heading = loaded.player.heading;
+    this.player.hp = loaded.player.hp;
+    this.player.armor = loaded.player.armor;
+    this.player.stamina = loaded.player.stamina;
+    this.player.money = loaded.player.money;
+    this.player.wantedLevel = loaded.player.wantedLevel;
+    this.player.weapon = loaded.player.weapon;
+    this.player.unlockedWeapons = [...loaded.player.unlockedWeapons];
+    this.player.ammo = { ...loaded.player.ammo };
+    this.player.outfit = loaded.player.outfit;
+    this.player.unlockedOutfits = [...loaded.player.unlockedOutfits];
+    this.player.unlockedSafehouses = [...loaded.player.unlockedSafehouses];
+    this.player.inventory = loaded.player.inventory.map((i) => ({ ...i }));
+
+    this.missionIdx = loaded.missions.missionIdx;
+    this.stepIdx = loaded.missions.stepIdx;
+    this.player.missionsCompleted = loaded.missions.missionsCompleted;
+    this.player.faresCompleted = loaded.missions.faresCompleted;
+    this.player.bountiesCompleted = loaded.missions.bountiesCompleted;
+    this.player.carTheftsCompleted = loaded.missions.carTheftsCompleted;
+
+    this.timeOfDay = loaded.world.timeOfDay;
+    this.weather = loaded.world.weather;
+
+    this.playerRig.group.position.set(this.player.x, 0, this.player.z);
+    this.playerRig.group.rotation.y = this.player.heading;
+    setHumanoidOutfit(this.playerRig, this.player.outfit);
+    setHumanoidWeaponMesh(this.playerRig, this.player.weapon);
+    this.applyEnvironmentLighting(0);
+
+    if (loaded.ownedVehicles && loaded.ownedVehicles.length > 0) {
+      const near = this.getActiveOrNearestVehicle(14);
+      if (near) {
+        near.customization = { ...loaded.ownedVehicles[0].customization };
+        near.color = loaded.ownedVehicles[0].color;
+      }
+    }
+
+    this.showToast('Game loaded successfully!');
+    this.emitHud();
+    return true;
   }
 
   public restartGame(): void {
@@ -663,6 +1000,126 @@ export class DhakaGameEngine {
     this.modal = this.modal === 'wardrobe' ? 'none' : 'wardrobe';
     this.clearInputs();
     this.emitHud();
+  }
+
+  public openMultiplayerLobby(): void {
+    if (this.phase !== 'playing' && this.phase !== 'title') return;
+    this.modal = this.modal === 'multiplayer_lobby' ? 'none' : 'multiplayer_lobby';
+    this.clearInputs();
+    this.emitHud();
+  }
+
+  public connectMultiplayer(serverUrl = 'ws://localhost:8080', callsign = 'DhakaPlayer'): void {
+    if (this.netClient) {
+      this.disconnectMultiplayer();
+    }
+
+    if (this.phase === 'title') {
+      this.startGame();
+    }
+
+    this.showToast('Connecting to Dhaka Multiplayer...');
+    this.netClient = new NetworkClient(serverUrl, {
+      onConnect: () => {
+        this.showToast('Connected to Dhaka Server');
+        this.emitHud();
+      },
+      onDisconnect: (reason: string) => {
+        this.showToast(`Multiplayer disconnected: ${reason}`);
+        this.cleanupRemoteRigs();
+        this.emitHud();
+      },
+      onAuthOk: (player: NetPlayerState) => {
+        this.showToast(`Logged in as ${player.name} (৳${player.money})`);
+        this.player.money = player.money;
+        this.player.hp = player.hp;
+        this.player.armor = player.armor;
+        this.player.x = player.transform.x;
+        this.player.z = player.transform.z;
+        this.modal = 'none';
+        this.emitHud();
+      },
+      onCombatEvent: (evt: SCombatEventMsg) => {
+        if (evt.lethal) {
+          const killText = `${evt.attackerName || 'Player'} defeated ${evt.victimName || 'Player'} [${evt.weapon}]`;
+          this.killfeed.unshift({
+            id: `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            text: killText,
+            timer: 5.0,
+          });
+          if (this.killfeed.length > 6) this.killfeed.pop();
+          this.audio.playImpact(true);
+        } else {
+          this.audio.playImpact(false);
+        }
+        this.emitHud();
+      },
+      onChat: (sender: string, text: string, isSystem: boolean) => {
+        this.chatMessages.push({
+          id: `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          sender,
+          text,
+          isSystem,
+        });
+        if (this.chatMessages.length > 50) this.chatMessages.shift();
+        this.emitHud();
+      },
+      onPlayerJoined: (p: NetPlayerState) => {
+        this.chatMessages.push({
+          id: `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          sender: 'SYSTEM',
+          text: `${p.name} arrived in Dhaka.`,
+          isSystem: true,
+        });
+        this.emitHud();
+      },
+      onPlayerLeft: (id: string, name: string) => {
+        this.chatMessages.push({
+          id: `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          sender: 'SYSTEM',
+          text: `${name || id} left Dhaka.`,
+          isSystem: true,
+        });
+        const rig = this.remotePlayerRigs.get(id);
+        if (rig) {
+          this.scene.remove(rig.group);
+          rig.dispose();
+          this.remotePlayerRigs.delete(id);
+        }
+        this.emitHud();
+      },
+      onError: (err: string) => {
+        this.showToast(`Server error: ${err}`);
+      },
+    });
+
+    this.netClient.connect(callsign, this.player.outfit);
+  }
+
+  public disconnectMultiplayer(): void {
+    if (this.netClient) {
+      this.netClient.disconnect();
+      this.netClient = null;
+    }
+    this.cleanupRemoteRigs();
+    this.multiplayerPing = 0;
+    this.multiplayerPlayerCount = 1;
+    this.showToast('Returned to offline single-player mode');
+    this.emitHud();
+  }
+
+  public sendChatMessage(text: string): void {
+    if (this.netClient && this.netClient.isConnected() && text.trim().length > 0) {
+      this.netClient.sendChat(text.trim());
+    }
+  }
+
+  private cleanupRemoteRigs(): void {
+    for (const [, rig] of this.remotePlayerRigs) {
+      this.scene.remove(rig.group);
+      rig.dispose();
+    }
+    this.remotePlayerRigs.clear();
   }
 
   public toggleMute(): void {
@@ -858,6 +1315,257 @@ export class DhakaGameEngine {
     this.emitHud();
   }
 
+  public handleSafehouseAction(action: 'rest' | 'save' | 'purchase' | 'armory' | 'wardrobe', safehouseId?: SafehouseId): void {
+    const id = safehouseId ?? this.activeSafehouseId ?? 'old_dhaka_rooftop';
+    const isOwned = this.player.unlockedSafehouses.includes(id);
+
+    if (action === 'purchase') {
+      const res = purchaseSafehouse(this.player, id);
+      if (res.ok) {
+        this.audio.playChime(false);
+        this.saveGame();
+      }
+      this.showToast(res.message);
+      this.emitHud();
+      return;
+    }
+
+    if (!isOwned) {
+      this.showToast('You must purchase this safehouse deed first!');
+      this.emitHud();
+      return;
+    }
+
+    if (action === 'rest') {
+      this.timeOfDay = (this.timeOfDay + 6) % 24;
+      const res = restAtSafehouse(this.player, 6);
+      this.audio.playChime(false);
+      this.applyEnvironmentLighting(0);
+      this.saveGame();
+      this.showToast(res.message);
+      this.emitHud();
+      return;
+    }
+
+    if (action === 'save') {
+      this.saveGame();
+      this.showToast('Game saved to Dhaka Cloud Storage!');
+      this.emitHud();
+      return;
+    }
+
+    if (action === 'armory') {
+      let refilled = false;
+      for (const w of this.player.unlockedWeapons) {
+        const spec = WEAPON_SPECS[w];
+        if (spec.magSize > 0) {
+          this.player.magAmmo[w] = spec.magSize;
+          this.player.ammo[w] = spec.magSize * 4;
+          refilled = true;
+        }
+      }
+      this.audio.playChime(false);
+      this.showToast(refilled ? 'Armory: All weapons fully reloaded!' : 'Armory accessed.');
+      this.emitHud();
+      return;
+    }
+
+    if (action === 'wardrobe') {
+      this.modal = 'wardrobe';
+      this.emitHud();
+      return;
+    }
+  }
+
+  public handleRefuelAction(action: 'refuel' | 'jerrycan'): void {
+    const veh = this.getActiveOrNearestVehicle(12);
+    if (action === 'refuel') {
+      const res = refuelVehicle(this.player, veh);
+      if (res.ok) {
+        this.audio.playChime(false);
+        this.saveGame();
+      }
+      this.showToast(res.message);
+      this.emitHud();
+      return;
+    }
+
+    if (action === 'jerrycan') {
+      const cost = 250;
+      if (this.player.money < cost) {
+        this.showToast('Need ৳250 to buy an emergency Jerrycan');
+        return;
+      }
+      this.player.money -= cost;
+      const existing = this.player.inventory.find((i) => i.id === 'item_jerrycan');
+      if (existing) {
+        existing.count++;
+      } else {
+        this.player.inventory.push({
+          id: 'item_jerrycan',
+          name: 'Emergency Octane Jerrycan (10L)',
+          banglaName: 'অকটেন জেরিক্যান',
+          kind: 'fuel',
+          count: 1,
+          value: 200,
+          description: 'Contains 10L high-octane fuel (+35% tank). Use when stalled.',
+        });
+      }
+      this.audio.playChime(false);
+      this.showToast('Bought 10L Emergency Octane Jerrycan!');
+      this.emitHud();
+      return;
+    }
+  }
+
+  public handleVehicleUpgrade(option: 'engine' | 'brakes' | 'turbo' | 'spoiler' | 'tint' | 'neon' | 'jammer', val?: any): void {
+    const targetVeh = this.getActiveOrNearestVehicle(14);
+    const res = applyVehicleCustomization(this.player, targetVeh, option, val);
+    if (res.ok) {
+      this.audio.playChime(false);
+      this.saveGame();
+    }
+    this.showToast(res.message);
+    this.emitHud();
+  }
+
+  public handleUseItem(itemId: string): void {
+    const veh = this.getActiveOrNearestVehicle(6);
+    const res = useInventoryItem(this.player, veh, itemId);
+    if (res.ok) {
+      this.audio.playChime(false);
+    }
+    this.showToast(res.message);
+    this.emitHud();
+  }
+
+  public startSideMission(kindOrId: SideMissionKind | string): void {
+    const spec = AVAILABLE_SIDE_MISSIONS.find((m) => m.id === kindOrId || m.kind === kindOrId);
+    if (!spec) return;
+
+    this.activeSideMission = {
+      ...spec,
+      step: 1,
+      timer: spec.maxTimer,
+    };
+
+    if (spec.id === 'side_bounty_mirpur' || spec.kind === 'bounty') {
+      this.spawnNpc({
+        role: 'syndicate',
+        policy: 'flanker',
+        name: 'Tariq "Chhuri"',
+        x: -95,
+        z: -175,
+        shirtColor: 0x7c2d12,
+        pantsColor: 0x1c1917,
+        accentColor: 0xef4444,
+        hp: 130,
+        missionTag: 'side_bounty_target',
+      });
+    }
+
+    this.audio.playChime(false);
+    this.showToast(`Started Side Mission: ${spec.title}`);
+    this.closeModal();
+    this.emitHud();
+  }
+
+  public cancelSideMission(): void {
+    if (!this.activeSideMission) return;
+    this.activeSideMission = null;
+    this.showToast('Side mission cancelled');
+    this.emitHud();
+  }
+
+  public handleDialogueOption(optionId: string): void {
+    if (!this.activeConversation) return;
+    const option = this.activeConversation.options.find((o) => o.id === optionId);
+    if (!option) return;
+
+    if (option.action === 'job') {
+      const targetParam = option.param;
+      const mission = AVAILABLE_SIDE_MISSIONS.find(
+        (m) => m.kind === targetParam || m.id === targetParam,
+      );
+      if (mission) {
+        this.startSideMission(mission.id);
+      } else {
+        this.showToast('No contracts currently available.');
+      }
+      return;
+    }
+
+    if (option.action === 'heal') {
+      const cost = option.param ? parseInt(option.param, 10) : 40;
+      if (this.player.money < cost) {
+        this.showToast(`Not enough Taka for fresh Cha (৳${cost})`);
+        return;
+      }
+      this.player.money -= cost;
+      this.player.hp = Math.min(this.player.maxHp, this.player.hp + 35);
+      this.player.stamina = Math.min(this.player.maxStamina, this.player.stamina + 45);
+      this.audio.playChime(false);
+      this.showToast('Drank fresh Old Dhaka Cardamom Cha (+35 HP, +45 Stamina)!');
+      this.emitHud();
+      return;
+    }
+
+    if (option.action === 'trade') {
+      if (option.param === 'shop') {
+        this.modal = 'shop';
+        this.clearInputs();
+        this.emitHud();
+        return;
+      }
+      if (option.param === 'safehouse') {
+        this.modal = 'safehouse';
+        this.clearInputs();
+        this.emitHud();
+        return;
+      }
+      const price = 200;
+      if (this.player.money < price) {
+        this.showToast(`Need ৳${price} for this item`);
+        return;
+      }
+      this.player.money -= price;
+      const existing = this.player.inventory.find((i) => i.id === 'item_jerrycan');
+      if (existing) {
+        existing.count++;
+      } else {
+        this.player.inventory.push({
+          id: 'item_jerrycan',
+          name: 'Emergency Octane Jerrycan (10L)',
+          banglaName: 'অকটেন জেরিক্যান',
+          kind: 'fuel',
+          count: 1,
+          value: 200,
+          description: 'Contains 10L high-octane fuel (+35% tank). Use when stalled.',
+        });
+      }
+      this.audio.playChime(false);
+      this.showToast('Purchased Octane Jerrycan (+1 in inventory)!');
+      this.emitHud();
+      return;
+    }
+
+    if (option.action === 'rumor') {
+      this.audio.playChime(false);
+      if (this.activeConversation.npcId === 'npc_rafiq') {
+        this.showToast('Rafiq Bhai: "Padma syndicate enforcers patrol Mirpur and Kawran Flyover at night."');
+      } else {
+        this.showToast('Nadia: "DMP patrol units are heavily concentrated near Thana and Motijheel."');
+      }
+      this.emitHud();
+      return;
+    }
+
+    if (option.action === 'leave') {
+      this.closeModal();
+      return;
+    }
+  }
+
   public toggleSideFare(): void {
     if (this.fare.active) {
       this.fare.active = false;
@@ -867,10 +1575,31 @@ export class DhakaGameEngine {
     }
     const veh = this.player.vehicleId ? this.vehicles.find((v) => v.id === this.player.vehicleId) : null;
     if (!veh) {
-      this.showToast('Hop into a CNG, Rickshaw, or Sedan [F] to pick up Dhaka fares!');
+      this.showToast('Hop into a CNG, Rickshaw, Sedan, or Boat [F] to pick up Dhaka fares!');
       this.emitHud();
       return;
     }
+
+    if (isWatercraftKind(veh.kind)) {
+      const candidateDocks = RIVER_DOCKS.filter((d) => Math.hypot(d.x - this.player.x, d.z - this.player.z) > 65);
+      const pickDock = candidateDocks[Math.floor(Math.random() * candidateDocks.length)] ?? RIVER_DOCKS[4];
+      const dist = Math.hypot(pickDock.x - this.player.x, pickDock.z - this.player.z);
+      const riverPassengerNames = ['Faruk Majhi', 'Alamgir Master', 'Rehana Begum', 'Kamal Mia', 'Dr. Subir Das'];
+      this.fare = {
+        active: true,
+        passengerName: riverPassengerNames[Math.floor(Math.random() * riverPassengerNames.length)],
+        destX: pickDock.x,
+        destZ: pickDock.z,
+        destLabel: `${pickDock.name} (${pickDock.banglaName})`,
+        timer: Math.max(45, Math.round(dist * 0.52 + 24)),
+        reward: 750 + Math.round(dist * 5.2),
+      };
+      this.audio.playChime(false);
+      this.showToast(`Buriganga Ferry Fare: Cross river to ${pickDock.banglaName}!`);
+      this.emitHud();
+      return;
+    }
+
     // Pick a destination at least 60m away across the expanded city
     const candidates = FARE_DESTINATIONS.filter((d) => Math.hypot(d.x - this.player.x, d.z - this.player.z) > 60);
     const pick = candidates[Math.floor(Math.random() * candidates.length)] ?? FARE_DESTINATIONS[0];
@@ -1036,6 +1765,30 @@ export class DhakaGameEngine {
     this.lastTimeMs = now;
     const dt = Math.min(Math.max(rawDt, 0.001), 0.05);
 
+    // Dynamic performance monitoring & graceful downscaling for sustained 60 FPS
+    this.frameCount++;
+    if (now - this.fpsWindowStartMs >= 2200) {
+      const avgFps = (this.frameCount * 1000) / (now - this.fpsWindowStartMs);
+      this.frameCount = 0;
+      this.fpsWindowStartMs = now;
+
+      if (!this.isSoftwareGl && avgFps < 38) {
+        this.lowFpsCounter++;
+        if (this.lowFpsCounter >= 2) {
+          this.lowFpsCounter = 0;
+          if (this.graphicsQuality === 'high') {
+            this.setGraphicsQuality('medium');
+            this.showToast('Adjusted to MEDIUM graphics for smooth 60 FPS');
+          } else if (this.graphicsQuality === 'medium') {
+            this.setGraphicsQuality('low');
+            this.showToast('Adjusted to LOW graphics for smooth 60 FPS');
+          }
+        }
+      } else {
+        this.lowFpsCounter = 0;
+      }
+    }
+
     this.updateFrame(dt);
     this.renderer.render(this.scene, this.camera);
 
@@ -1146,6 +1899,60 @@ export class DhakaGameEngine {
 
     this.updateGameplayCamera(dt);
 
+    // Authoritative multiplayer networking & remote rigs update
+    if (this.netClient && this.netClient.isConnected()) {
+      this.netClient.update(dt);
+      this.multiplayerPing = this.netClient.getPing();
+      const localState = this.netClient.getLocalPlayerState();
+      if (localState) {
+        this.player.hp = localState.hp;
+        this.player.armor = localState.armor;
+        this.player.money = localState.money;
+      }
+
+      const { players: remotePlayers } = this.netClient.getInterpolatedEntities();
+      this.multiplayerPlayerCount = remotePlayers.length;
+      const activeIds = new Set<string>();
+
+      for (const p of remotePlayers) {
+        if (p.id === this.netClient.getLocalPlayerId()) continue;
+        activeIds.add(p.id);
+
+        let rig = this.remotePlayerRigs.get(p.id);
+        if (!rig) {
+          rig = new RemotePlayerRig(
+            p.id,
+            `Player_${p.id.slice(0, 5)}`,
+            'street',
+            0xffffff,
+            this.textures,
+            this.characterTemplate,
+            !this.isSoftwareGl,
+          );
+          this.scene.add(rig.group);
+          this.remotePlayerRigs.set(p.id, rig);
+        }
+
+        const remoteSpeed = Math.hypot(p.vx, p.vz);
+        rig.updateInterpolated(p.x, p.y, p.z, p.heading, remoteSpeed, p.weapon, p.hp, p.armor, p.state, dt);
+      }
+
+      for (const [id, rig] of this.remotePlayerRigs) {
+        if (!activeIds.has(id)) {
+          this.scene.remove(rig.group);
+          rig.dispose();
+          this.remotePlayerRigs.delete(id);
+        }
+      }
+
+      for (let i = this.killfeed.length - 1; i >= 0; i--) {
+        this.killfeed[i].timer -= dt;
+        if (this.killfeed[i].timer <= 0) {
+          this.killfeed.splice(i, 1);
+        }
+      }
+    }
+
     // Update continuous audio loops
     const activeVeh = this.player.vehicleId ? this.vehicles.find((v) => v.id === this.player.vehicleId) : null;
     const speedRatio = activeVeh ? Math.min(1, Math.abs(activeVeh.speed) / VEHICLE_SPECS[activeVeh.kind].maxSpeed) : 0;
@@ -1172,13 +1979,29 @@ export class DhakaGameEngine {
   }
 
   private handleEdgeInputs(): void {
-    // Enter / Exit nearest vehicle [F]
-    if (this.keysJustPressed.has('KeyF')) {
+    // Enter / Exit nearest vehicle or watercraft [F] or [E]
+    if (
+      this.keysJustPressed.has('KeyF') ||
+      (this.keysJustPressed.has('KeyE') && (this.player.vehicleId || this.getActiveOrNearestVehicle(5.6)))
+    ) {
       this.tryToggleVehicle();
     }
 
-    // Interact with Garage / Shop / Wardrobe [G]
+    // Dock watercraft at river berth or Interact with Garage / Shop / Wardrobe [G]
     if (this.keysJustPressed.has('KeyG')) {
+      if (this.player.vehicleId) {
+        const veh = this.vehicles.find((v) => v.id === this.player.vehicleId);
+        if (veh && isWatercraftKind(veh.kind)) {
+          const dock = getNearestRiverDock(veh.x, veh.z, 16.0);
+          if (dock) {
+            dockWatercraftAtBerth(veh, dock);
+            this.audio.playChime(true);
+            this.showToast(`Berth Secured at ${dock.name} (${dock.banglaName})`);
+            this.emitHud();
+            return;
+          }
+        }
+      }
       this.tryInteractPoi();
     }
 
@@ -1187,7 +2010,7 @@ export class DhakaGameEngine {
       this.openWardrobe();
     }
 
-    // Toggle CNG/Taxi Fare Side Hustle [N]
+    // Toggle CNG/Taxi/Boat Fare Side Hustle [N]
     if (this.keysJustPressed.has('KeyN')) {
       this.toggleSideFare();
     }
@@ -1230,19 +2053,45 @@ export class DhakaGameEngine {
 
   private tryToggleVehicle(): void {
     if (this.player.vehicleId) {
-      // Exit vehicle cleanly on the driver's left side
+      if (this.netClient && this.netClient.isConnected()) {
+        this.netClient.sendVehicleAction('exit', this.player.vehicleId);
+      }
+      // Exit vehicle cleanly on the driver's left side or onto dock pier
       const veh = this.vehicles.find((v) => v.id === this.player.vehicleId);
       this.player.vehicleId = null;
       if (veh) {
         veh.driver = 'none';
         veh.sirenOn = false;
-        const exitX = veh.x - Math.cos(veh.heading) * (VEHICLE_SPECS[veh.kind].halfWidth + 1.15);
-        const exitZ = veh.z + Math.sin(veh.heading) * (VEHICLE_SPECS[veh.kind].halfWidth + 1.15);
-        const safe = resolveCircleCollisions(exitX, exitZ, 0.5, this.colliders);
-        this.player.x = safe.x;
-        this.player.z = safe.z;
-        this.player.y = 0;
-        this.player.heading = veh.heading;
+        if (isWatercraftKind(veh.kind)) {
+          const dock = getNearestRiverDock(veh.x, veh.z, 18.0);
+          if (dock) {
+            this.player.x = dock.x;
+            this.player.z = dock.z;
+            this.player.y = 0;
+            this.player.vy = 0;
+            this.player.isSwimming = false;
+            this.player.grounded = true;
+          } else {
+            const exitDist = VEHICLE_SPECS[veh.kind].halfWidth + 1.6;
+            this.player.x = veh.x - Math.cos(veh.heading) * exitDist;
+            this.player.z = veh.z + Math.sin(veh.heading) * exitDist;
+            const wave = getRiverWaveSample(this.player.x, this.player.z, this.playTimeSec);
+            this.player.y = wave.height + 0.12;
+            this.player.vy = 0;
+            this.player.isSwimming = true;
+            this.player.grounded = true;
+            this.audio.playWaterSplash(0.5);
+          }
+        } else {
+          const exitX = veh.x - Math.cos(veh.heading) * (VEHICLE_SPECS[veh.kind].halfWidth + 1.15);
+          const exitZ = veh.z + Math.sin(veh.heading) * (VEHICLE_SPECS[veh.kind].halfWidth + 1.15);
+          const safe = resolveCircleCollisions(exitX, exitZ, 0.5, this.colliders);
+          this.player.x = safe.x;
+          this.player.z = safe.z;
+          this.player.y = 0;
+          this.player.heading = veh.heading;
+          this.player.isSwimming = false;
+        }
       }
       this.playerRig.group.visible = true;
       this.audio.playImpact(false);
@@ -1253,18 +2102,44 @@ export class DhakaGameEngine {
     const nearest = this.getActiveOrNearestVehicle(5.6);
     if (!nearest) return;
 
-    // Hijacking a moving traffic or police vehicle adds minor Wanted Heat
-    if (nearest.driver === 'traffic' || nearest.kind === 'police') {
-      const heat = nearest.kind === 'police' ? 30 : 14;
+    if (this.netClient && this.netClient.isConnected()) {
+      this.netClient.sendVehicleAction('enter', nearest.id);
+    }
+
+    // Hijacking a moving traffic or police vehicle adds Wanted Heat & triggers carjacking reaction
+    const wasOccupied = nearest.driver === 'traffic' || nearest.driver === 'police';
+    if (wasOccupied) {
+      nearest.stoleFromNpc = true;
+      const isPolice = nearest.kind === 'police' || nearest.driver === 'police';
+      const heat = isPolice ? 45 : 20;
       addWantedHeat(this.player, heat);
+      this.player.carTheftsCompleted = (this.player.carTheftsCompleted || 0) + 1;
+
+      // Pull out driver: spawn punch impact visual & sound
+      this.spawnBurst(nearest.x, 1.2, nearest.z, 0xff5533, 12, 4.0);
+      this.audio.playImpact(true);
+
+      // Spawn fleeing civilian driver running away from car
+      this.spawnFleeingDriver(nearest.x, nearest.z, nearest.heading);
+
       this.showToast(
-        nearest.kind === 'police' ? 'Hijacked DMP Patrol! Police alerted!' : `Took control of ${VEHICLE_SPECS[nearest.kind].name}`,
+        isPolice
+          ? 'Carjacked DMP Patrol Unit! 2-Star Police Pursuit Triggered!'
+          : `Carjacked ${VEHICLE_SPECS[nearest.kind].name}! (+${heat} Crime Heat)`,
+      );
+
+      // Check active side mission progress if targeting this car
+      this.checkSideMissionTheftProgress(nearest);
+    } else if (isWatercraftKind(nearest.kind)) {
+      this.showToast(
+        `Boarded ${VEHICLE_SPECS[nearest.kind].name} (${nearest.kind === 'launch' ? 'যাত্রীবাহী লঞ্চ' : nearest.kind === 'speedboat' ? 'স্পিডবোট' : 'জেট স্কি'})`,
       );
     }
 
     nearest.driver = 'player';
     nearest.sirenOn = nearest.kind === 'police';
     this.player.vehicleId = nearest.id;
+    this.player.isSwimming = false;
     this.playerRig.group.visible = false;
     this.audio.playHorn(nearest.kind);
     this.emitHud();
@@ -1285,6 +2160,27 @@ export class DhakaGameEngine {
           this.emitHud();
           return;
         }
+        if (poi.kind === 'safehouse') {
+          this.activeSafehouseId = poi.id as SafehouseId;
+          this.modal = 'safehouse';
+          this.clearInputs();
+          this.emitHud();
+          return;
+        }
+        if (poi.kind === 'fuel_station') {
+          this.modal = 'fuel_station';
+          this.clearInputs();
+          this.emitHud();
+          return;
+        }
+        if (poi.kind === 'dialogue_npc') {
+          const npcId = poi.id.replace('_poi', '');
+          this.activeConversation = INTERACTIVE_NPCS.find((n) => n.npcId === npcId) ?? null;
+          this.modal = 'dialogue';
+          this.clearInputs();
+          this.emitHud();
+          return;
+        }
         if (poi.kind === 'tea_stall') {
           this.player.hp = Math.min(this.player.maxHp, this.player.hp + 25);
           this.audio.playChime(false);
@@ -1296,6 +2192,42 @@ export class DhakaGameEngine {
     }
   }
 
+  private spawnFleeingDriver(x: number, z: number, heading: number): void {
+    const doorX = x - Math.cos(heading) * 1.6;
+    const doorZ = z + Math.sin(heading) * 1.6;
+    const civilian = this.spawnNpc({
+      role: 'civilian',
+      policy: 'chaser',
+      name: 'Panicked Driver',
+      x: doorX,
+      z: doorZ,
+      shirtColor: 0xe0e7ff,
+      pantsColor: 0x334155,
+      accentColor: 0xf43f5e,
+      hp: 40,
+    });
+    civilian.state = 'flee';
+    civilian.dangerSourceX = x;
+    civilian.dangerSourceZ = z;
+    civilian.dangerLevel = 1.0;
+    civilian.stateTimer = 8.0;
+  }
+
+  private checkSideMissionTheftProgress(veh: VehicleState): void {
+    if (!this.activeSideMission) return;
+    if (this.activeSideMission.id === 'side_theft_sedan' && veh.kind === 'sedan') {
+      this.activeSideMission.step = 2;
+      this.activeSideMission.objective = 'Deliver Sedan to Babu Chop Shop in Old Dhaka (-36, 58)';
+      this.activeSideMission.targetX = -36;
+      this.activeSideMission.targetZ = 58;
+      this.showToast('Sedan acquired! Deliver to Babu at Old Dhaka Chop Shop!');
+    } else if (this.activeSideMission.id === 'side_theft_police' && veh.kind === 'police') {
+      this.activeSideMission.step = 2;
+      this.activeSideMission.objective = 'Evade DMP Pursuit until Wanted Stars expire!';
+      this.showToast('DMP Cruiser hijacked! Evade the police chase!');
+    }
+  }
+
   private getActiveOrNearestVehicle(maxDist: number): VehicleState | null {
     if (this.player.vehicleId) {
       return this.vehicles.find((v) => v.id === this.player.vehicleId) ?? null;
@@ -1304,8 +2236,9 @@ export class DhakaGameEngine {
     let bestDist = maxDist;
     for (const v of this.vehicles) {
       if (v.hp <= 0) continue;
+      const effectiveMax = isWatercraftKind(v.kind) ? (v.kind === 'launch' ? maxDist + 6.0 : maxDist + 2.0) : maxDist;
       const d = Math.hypot(v.x - this.player.x, v.z - this.player.z);
-      if (d < bestDist) {
+      if (d < effectiveMax && d < bestDist) {
         bestDist = d;
         best = v;
       }
@@ -1316,6 +2249,9 @@ export class DhakaGameEngine {
   // === ON-FOOT PLAYER CONTROLLER & COMBAT ===
 
   private updateOnFootPlayer(dt: number): void {
+    const inWater = isPointInBurigangaWater(this.player.x, this.player.z);
+    this.player.isSwimming = inWater;
+
     // Q / E keyboard camera orbit
     if (this.keysHeld.has('KeyQ')) this.camYaw += dt * 1.9;
     if (this.keysHeld.has('KeyE')) this.camYaw -= dt * 1.9;
@@ -1338,16 +2274,16 @@ export class DhakaGameEngine {
     const wantsSprint = (this.keysHeld.has('ShiftLeft') || this.keysHeld.has('ShiftRight')) && moveLen > 0.1;
     const sprinting = wantsSprint && this.player.stamina > 6;
     if (sprinting) {
-      this.player.stamina = Math.max(0, this.player.stamina - dt * 26);
+      this.player.stamina = Math.max(0, this.player.stamina - dt * (inWater ? 32 : 26));
     } else {
       this.player.stamina = Math.min(this.player.maxStamina, this.player.stamina + dt * 18);
     }
 
-    const targetSpeed = sprinting ? 9.6 : 5.8;
+    const targetSpeed = inWater ? (sprinting ? 2.8 : 1.6) : (sprinting ? 9.6 : 5.8);
     if (moveLen > 0.01) {
       moveX /= moveLen;
       moveZ /= moveLen;
-      const accel = 1 - Math.exp(-14 * dt);
+      const accel = 1 - Math.exp((inWater ? -7 : -14) * dt);
       this.player.vx += (moveX * targetSpeed - this.player.vx) * accel;
       this.player.vz += (moveZ * targetSpeed - this.player.vz) * accel;
       const targetHeading = Math.atan2(moveX, moveZ);
@@ -1356,49 +2292,73 @@ export class DhakaGameEngine {
       while (diff < -Math.PI) diff += Math.PI * 2;
       this.player.heading += diff * (1 - Math.exp(-13 * dt));
     } else {
-      const decel = 1 - Math.exp(-12 * dt);
+      const decel = 1 - Math.exp((inWater ? -6 : -12) * dt);
       this.player.vx *= 1 - decel;
       this.player.vz *= 1 - decel;
     }
 
-    // Coyote time & jump buffering
-    if (this.player.grounded) {
-      this.player.coyoteTimer = 0.1;
-    } else {
-      this.player.coyoteTimer = Math.max(0, this.player.coyoteTimer - dt);
-    }
-    if (this.player.jumpBufferTimer > 0) {
-      this.player.jumpBufferTimer = Math.max(0, this.player.jumpBufferTimer - dt);
-      if (this.player.coyoteTimer > 0) {
-        this.player.vy = 7.4;
-        this.player.grounded = false;
-        this.player.coyoteTimer = 0;
-        this.player.jumpBufferTimer = 0;
-        this.playerSquashY = 1.22; // takeoff stretch
-        this.spawnBurst(this.player.x, 0.15, this.player.z, 0xd6cfc2, 5, 2.5);
-        this.audio.playImpact(false);
-      }
+    if (this.netClient && this.netClient.isConnected()) {
+      this.netClient.sendMovementInput(
+        dt,
+        moveX,
+        moveZ,
+        this.player.heading,
+        sprinting,
+        this.player.jumpBufferTimer > 0,
+      );
     }
 
-    // Vertical physics
-    this.player.vy -= 21 * dt;
-    this.player.y += this.player.vy * dt;
-    if (this.player.y <= 0) {
-      if (!this.player.grounded && this.player.vy < -3) {
-        this.playerSquashY = 0.78; // landing squash
-        this.spawnBurst(this.player.x, 0.12, this.player.z, 0xb8b0a4, 4, 2.0);
-      }
-      this.player.y = 0;
+    // Vertical physics & Swimming Buoyancy
+    if (inWater) {
+      const wave = getRiverWaveSample(this.player.x, this.player.z, this.playTimeSec);
+      this.player.y = wave.height + 0.1;
       this.player.vy = 0;
       this.player.grounded = true;
+      this.player.coyoteTimer = 0;
+      this.player.jumpBufferTimer = 0;
+      if (moveLen > 0.05 && Math.random() < 0.22) {
+        this.spawnBurst(this.player.x, wave.height + 0.05, this.player.z, 0x67e8f9, 2, 1.2);
+      }
+    } else {
+      // Coyote time & jump buffering on land
+      if (this.player.grounded) {
+        this.player.coyoteTimer = 0.1;
+      } else {
+        this.player.coyoteTimer = Math.max(0, this.player.coyoteTimer - dt);
+      }
+      if (this.player.jumpBufferTimer > 0) {
+        this.player.jumpBufferTimer = Math.max(0, this.player.jumpBufferTimer - dt);
+        if (this.player.coyoteTimer > 0) {
+          this.player.vy = 7.4;
+          this.player.grounded = false;
+          this.player.coyoteTimer = 0;
+          this.player.jumpBufferTimer = 0;
+          this.playerSquashY = 1.22; // takeoff stretch
+          this.spawnBurst(this.player.x, 0.15, this.player.z, 0xd6cfc2, 5, 2.5);
+          this.audio.playImpact(false);
+        }
+      }
+
+      this.player.vy -= 21 * dt;
+      this.player.y += this.player.vy * dt;
+      if (this.player.y <= 0) {
+        if (!this.player.grounded && this.player.vy < -3) {
+          this.playerSquashY = 0.78; // landing squash
+          this.spawnBurst(this.player.x, 0.12, this.player.z, 0xb8b0a4, 4, 2.0);
+        }
+        this.player.y = 0;
+        this.player.vy = 0;
+        this.player.grounded = true;
+      }
     }
 
-    // Horizontal motion + AABB resolution
+    // Horizontal motion + AABB resolution (allows swimming in open Buriganga river)
     const res = resolveCircleCollisions(
       this.player.x + this.player.vx * dt,
       this.player.z + this.player.vz * dt,
       0.52,
       this.colliders,
+      inWater,
     );
     this.player.x = res.x;
     this.player.z = res.z;
@@ -1438,9 +2398,10 @@ export class DhakaGameEngine {
 
     this.playerRig.animator.update(dt, {
       speed: horizSpeed,
-      maxWalkSpeed: 5.8,
-      maxRunSpeed: 9.6,
+      maxWalkSpeed: inWater ? 1.8 : 5.8,
+      maxRunSpeed: inWater ? 3.0 : 9.6,
       isGrounded: this.player.grounded,
+      isSwimming: inWater,
       weapon: this.player.weapon,
       isAiming: this.player.weapon !== 'fists',
     });
@@ -1485,6 +2446,10 @@ export class DhakaGameEngine {
     this.playerRig.animator.triggerAttack();
     this.audio.playWeapon(weaponId);
 
+    if (this.netClient && this.netClient.isConnected()) {
+      this.netClient.sendAttack(weaponId, this.player.heading);
+    }
+
     // Face camera forward direction when firing a gun
     if (weaponId !== 'fists') {
       this.player.heading = Math.atan2(-Math.sin(this.camYaw), -Math.cos(this.camYaw));
@@ -1506,6 +2471,7 @@ export class DhakaGameEngine {
 
     // Firing firearms in public near civilians alerts police slightly
     if (weaponId !== 'fists') {
+      this.alertNearbyPedestriansOfDanger(this.player.x, this.player.z, 40);
       const policeNear = this.npcs.some((n) => n.role === 'police' && n.state !== 'ko' && Math.hypot(n.x - this.player.x, n.z - this.player.z) < 28);
       if (policeNear) addWantedHeat(this.player, 12);
     }
@@ -1553,6 +2519,7 @@ export class DhakaGameEngine {
     this.npcRigs.get(npc.id)?.animator.triggerHit();
     this.spawnBurst(npc.x, 1.3, npc.z, 0xf97316, heavy ? 12 : 6, 4.5);
     this.audio.playImpact(heavy);
+    this.alertNearbyPedestriansOfDanger(npc.x, npc.z, 28);
 
     if (npc.role === 'civilian') {
       addWantedHeat(this.player, 22);
@@ -1595,6 +2562,15 @@ export class DhakaGameEngine {
       (this.keysHeld.has('KeyD') || this.keysHeld.has('ArrowRight') ? 1 : 0);
     const handbrake = this.keysHeld.has('Space');
 
+    if (this.netClient && this.netClient.isConnected()) {
+      this.netClient.sendVehicleInput(
+        throttle,
+        steer,
+        handbrake,
+        this.keysHeld.has('KeyH'),
+      );
+    }
+
     const prevX = veh.x;
     const prevZ = veh.z;
     const res = stepVehicleKinematics(veh, { throttle, steer, handbrake }, dt, this.colliders);
@@ -1602,8 +2578,24 @@ export class DhakaGameEngine {
     this.player.distanceDriven += Math.hypot(veh.x - prevX, veh.z - prevZ);
     this.player.x = veh.x;
     this.player.z = veh.z;
-    this.player.y = 0;
     this.player.heading = veh.heading;
+
+    if (isWatercraftKind(veh.kind)) {
+      this.player.y = veh.y;
+      veh.wakeTimer = (veh.wakeTimer ?? 0) + dt;
+      if (veh.wakeTimer >= 0.055 && Math.abs(veh.speed) > 1.8) {
+        veh.wakeTimer = 0;
+        const sternDist = VEHICLE_SPECS[veh.kind].halfLength * 0.92;
+        const sternX = veh.x - Math.sin(veh.heading) * sternDist;
+        const sternZ = veh.z - Math.cos(veh.heading) * sternDist;
+        this.spawnBurst(sternX, veh.y + 0.04, sternZ, 0xe0f2fe, 3, 1.4);
+        if (veh.isPlaning || Math.abs(veh.speed) > 11) {
+          this.spawnBurst(sternX, veh.y + 0.12, sternZ, 0xf0f9ff, 5, 3.2);
+        }
+      }
+    } else {
+      this.player.y = 0;
+    }
 
     if (res.collided && res.impactSpeed > 6) {
       this.trauma = Math.min(1, this.trauma + Math.min(0.6, res.impactSpeed * 0.03));
@@ -1661,6 +2653,7 @@ export class DhakaGameEngine {
           this.audio.playImpact(true);
           this.trauma = Math.min(1, this.trauma + 0.28);
           this.spawnBurst((veh.x + other.x) * 0.5, 0.8, (veh.z + other.z) * 0.5, 0xfbbf24, 10, 5);
+          this.alertNearbyPedestriansOfDanger(veh.x, veh.z, 32);
           veh.speed *= 0.45;
           other.hp = Math.max(0, other.hp - 18);
           if (other.kind === 'police') addWantedHeat(this.player, 24);
@@ -1687,68 +2680,74 @@ export class DhakaGameEngine {
   // === TRAFFIC AI ===
 
   private updateTraffic(dt: number): void {
-    for (const v of this.vehicles) {
+    this.trafficLights.update(this.playTimeSec);
+
+    const crossingPeds = this.npcs
+      .filter((n) => n.state === 'crossing')
+      .map((n) => ({ x: n.x, z: n.z, isCrossing: true }));
+
+    for (let i = this.vehicles.length - 1; i >= 0; i--) {
+      const v = this.vehicles[i];
       if (v.driver === 'player') continue;
 
+      const distP = Math.hypot(v.x - this.player.x, v.z - this.player.z);
+
+      // Despawn streamed traffic vehicles that wander too far from player (> 165m)
+      if (distP > 165 && v.id.startsWith('t_stream_') && v.driver === 'traffic') {
+        const rig = this.vehicleRigs.get(v.id);
+        if (rig) {
+          this.scene.remove(rig.group);
+          this.vehicleRigs.delete(v.id);
+        }
+        this.vehicles.splice(i, 1);
+        continue;
+      }
+
       if (v.driver === 'traffic') {
-        const route = TRAFFIC_ROUTES[v.routeIdx % TRAFFIC_ROUTES.length];
-        const wp = route[v.waypointIdx % route.length];
-        const dx = wp.x - v.x;
-        const dz = wp.z - v.z;
-        const dist = Math.hypot(dx, dz);
-        if (dist < 4.5) {
-          v.waypointIdx = (v.waypointIdx + 1) % route.length;
-        }
+        updateLaneAwareTrafficVehicle(
+          v,
+          dt,
+          this.vehicles,
+          this.player.x,
+          this.player.z,
+          this.player.vehicleId,
+          this.playTimeSec,
+          this.colliders,
+          crossingPeds,
+        );
 
-        const desiredHeading = Math.atan2(dx, dz);
-        let diff = desiredHeading - v.heading;
-        while (diff > Math.PI) diff -= Math.PI * 2;
-        while (diff < -Math.PI) diff += Math.PI * 2;
-        const steer = THREE.MathUtils.clamp(diff * 1.8, -1, 1);
-
-        // Brake if player or another vehicle is directly ahead
-        const fx = Math.sin(v.heading);
-        const fz = Math.cos(v.heading);
-        let blocked = false;
-        const pDx = this.player.x - v.x;
-        const pDz = this.player.z - v.z;
-        const pDist = Math.hypot(pDx, pDz);
-        if (pDist < 7.5 && (pDx * fx + pDz * fz) / Math.max(0.1, pDist) > 0.72) {
-          blocked = true;
+        if (v.honkTimer && v.honkTimer > 4.3) {
+          this.audio.playHorn(v.kind);
         }
-        if (!blocked) {
-          for (const other of this.vehicles) {
-            if (other.id === v.id) continue;
-            const odx = other.x - v.x;
-            const odz = other.z - v.z;
-            const od = Math.hypot(odx, odz);
-            if (od < 8.5 && (odx * fx + odz * fz) / Math.max(0.1, od) > 0.75) {
-              blocked = true;
-              break;
-            }
-          }
-        }
-
-        const targetRatio = blocked ? 0 : 0.42;
-        const spec = VEHICLE_SPECS[v.kind];
-        const throttle = blocked ? -0.9 : v.speed < spec.maxSpeed * targetRatio ? 0.55 : 0;
-        stepVehicleKinematics(v, { throttle, steer, handbrake: blocked }, dt, this.colliders);
       } else if (v.driver === 'police') {
-        // Active DMP patrol pursuit vehicle
-        const dx = this.player.x - v.x;
-        const dz = this.player.z - v.z;
-        const dist = Math.hypot(dx, dz);
-        const desiredHeading = Math.atan2(dx, dz);
-        let diff = desiredHeading - v.heading;
-        while (diff > Math.PI) diff -= Math.PI * 2;
-        while (diff < -Math.PI) diff += Math.PI * 2;
-        const steer = THREE.MathUtils.clamp(diff * 2.1, -1, 1);
-        const throttle = dist > 9.5 ? 0.78 : -0.4;
-        v.sirenOn = this.player.wantedLevel > 0;
-        if (this.player.wantedLevel === 0) {
+        if (this.player.wantedLevel > 0) {
+          // Active DMP patrol pursuit vehicle
+          const dx = this.player.x - v.x;
+          const dz = this.player.z - v.z;
+          const dist = Math.hypot(dx, dz);
+          const desiredHeading = Math.atan2(dx, dz);
+          let diff = desiredHeading - v.heading;
+          while (diff > Math.PI) diff -= Math.PI * 2;
+          while (diff < -Math.PI) diff += Math.PI * 2;
+          const steer = THREE.MathUtils.clamp(diff * 2.1, -1, 1);
+          const throttle = dist > 9.5 ? 0.78 : -0.4;
+          v.sirenOn = true;
+          stepVehicleKinematics(v, { throttle, steer, handbrake: dist < 8 }, dt, this.colliders);
+        } else {
+          v.sirenOn = false;
           v.driver = 'traffic';
+          updateLaneAwareTrafficVehicle(
+            v,
+            dt,
+            this.vehicles,
+            this.player.x,
+            this.player.z,
+            this.player.vehicleId,
+            this.playTimeSec,
+            this.colliders,
+            crossingPeds,
+          );
         }
-        stepVehicleKinematics(v, { throttle, steer, handbrake: dist < 8 }, dt, this.colliders);
       } else {
         // Parked vehicle rolls to a stop smoothly
         if (Math.abs(v.speed) > 0.05) {
@@ -1758,6 +2757,12 @@ export class DhakaGameEngine {
 
       this.syncVehicleRig(v, dt);
     }
+
+    // Dynamic traffic vehicle streaming: maintain 20-28 active traffic vehicles around player
+    const trafficCount = this.vehicles.filter((v) => v.driver === 'traffic').length;
+    if (trafficCount < 22) {
+      this.spawnStreamingVehicle();
+    }
   }
 
   private syncVehicleRig(v: VehicleState, dt: number): void {
@@ -1765,6 +2770,16 @@ export class DhakaGameEngine {
     if (!rig) return;
     rig.group.position.set(v.x, v.y, v.z);
     rig.group.rotation.y = v.heading;
+
+    // Pitch and Roll dynamics for watercraft and banking terrestrial vehicles
+    rig.group.rotation.x = v.pitch ?? 0;
+    rig.group.rotation.z = v.roll ?? 0;
+
+    // Spin propellers for watercraft
+    if (rig.propeller) {
+      const propSpeed = Math.max(2.8, Math.abs(v.speed) * 4.6);
+      rig.propeller.rotation.z += propSpeed * dt;
+    }
 
     const wheelSpin = v.speed * dt * 2.2;
     rig.wheels.forEach((w, idx) => {
@@ -1837,6 +2852,34 @@ export class DhakaGameEngine {
         rig.group.rotation.y = npc.heading;
         if (distP < this.qualityConfig.npcAnimationMaxDist) {
           rig.animator.update(dt, { speed: 0, isGrounded: true });
+        }
+        continue;
+      }
+
+      if (npc.role === 'civilian') {
+        // Despawn streamed civilians that wander too far from player (> 105m)
+        if (distP > 105 && npc.id.startsWith('npc_')) {
+          rig.animator.disposeMixer();
+          this.scene.remove(rig.group);
+          this.npcRigs.delete(npc.id);
+          this.npcs.splice(i, 1);
+          continue;
+        }
+
+        updateIntelligentPedestrian(
+          npc,
+          dt,
+          this.npcs,
+          this.vehicles,
+          this.player.x,
+          this.player.z,
+          this.colliders,
+        );
+
+        rig.group.position.set(npc.x, 0, npc.z);
+        rig.group.rotation.y = npc.heading;
+        if (distP < this.qualityConfig.npcAnimationMaxDist) {
+          updatePedestrianAnimator(rig.animator, npc, dt);
         }
         continue;
       }
@@ -1966,11 +3009,20 @@ export class DhakaGameEngine {
         });
       }
     }
+
+    // Dynamic pedestrian streaming: maintain 32-42 active pedestrians around player
+    const civilianCount = this.npcs.filter((n) => n.role === 'civilian').length;
+    if (civilianCount < 36) {
+      this.spawnStreamingPedestrian();
+    }
   }
 
   private executeEnemyAttack(npc: NpcState, distP: number, dxP: number, dzP: number): void {
     const isRanged = npc.policy === 'ranged' || npc.role === 'boss';
+    const rig = this.npcRigs.get(npc.id);
     if (isRanged) {
+      rig?.animator.triggerShoot();
+      this.alertNearbyPedestriansOfDanger(npc.x, npc.z, 36);
       this.audio.playWeapon(npc.role === 'boss' ? 'shotgun' : 'pistol');
       this.spawnBurst(npc.x + Math.sin(npc.heading) * 0.7, 1.35, npc.z + Math.cos(npc.heading) * 0.7, 0xffa726, 6, 5);
       // Slight inaccuracy so moving/dodging player can evade shots
@@ -2059,10 +3111,17 @@ export class DhakaGameEngine {
     if (this.fare.active) {
       this.fare.timer -= dt;
       this.world.fareBeacon.visible = true;
-      this.world.fareBeacon.position.set(this.fare.destX, 0, this.fare.destZ);
+      const beaconY = this.fare.destZ >= RIVER_Z_START ? BURIGANGA_WATER_LEVEL + 0.35 : 0;
+      this.world.fareBeacon.position.set(this.fare.destX, beaconY, this.fare.destZ);
       this.world.fareBeacon.rotation.y += dt * 1.4;
 
-      if (Math.hypot(this.player.x - this.fare.destX, this.player.z - this.fare.destZ) < 6.5) {
+      const inWatercraft = Boolean(
+        this.player.vehicleId &&
+        this.vehicles.some((v) => v.id === this.player.vehicleId && isWatercraftKind(v.kind)),
+      );
+      const arrivalRadius = inWatercraft ? 14.0 : 6.5;
+
+      if (Math.hypot(this.player.x - this.fare.destX, this.player.z - this.fare.destZ) < arrivalRadius) {
         this.player.money += this.fare.reward;
         this.player.faresCompleted += 1;
         this.fare.active = false;
@@ -2078,6 +3137,63 @@ export class DhakaGameEngine {
       }
     } else {
       this.world.fareBeacon.visible = false;
+    }
+
+    // Side mission progression
+    if (this.activeSideMission) {
+      const sm = this.activeSideMission;
+      if (sm.timer !== undefined) {
+        sm.timer -= dt;
+        if (sm.timer <= 0) {
+          this.activeSideMission = null;
+          this.showToast('Side Mission Failed: Time Expired');
+          this.emitHud();
+        }
+      }
+
+      if (this.activeSideMission) {
+        let smCompleted = false;
+
+        if (sm.id === 'side_theft_sedan' && sm.step === 2) {
+          const veh = this.player.vehicleId ? this.vehicles.find((v) => v.id === this.player.vehicleId) : null;
+          if (veh && veh.kind === 'sedan' && Math.hypot(this.player.x - sm.targetX, this.player.z - sm.targetZ) < 14) {
+            smCompleted = true;
+          }
+        } else if (sm.id === 'side_theft_police' && sm.step === 2) {
+          if (this.player.wantedLevel === 0) {
+            smCompleted = true;
+          }
+        } else if (sm.id === 'side_bounty_mirpur') {
+          const bountyNpc = this.npcs.find((n) => n.missionTag === 'side_bounty_target');
+          if (bountyNpc && bountyNpc.state === 'ko') {
+            smCompleted = true;
+          }
+        } else if (sm.id === 'side_courier_buriganga') {
+          const inWatercraft = Boolean(
+            this.player.vehicleId &&
+            this.vehicles.some((v) => v.id === this.player.vehicleId && isWatercraftKind(v.kind)),
+          );
+          if (inWatercraft && Math.hypot(this.player.x - sm.targetX, this.player.z - sm.targetZ) < 16) {
+            smCompleted = true;
+          }
+        }
+
+        if (smCompleted) {
+          this.player.money += sm.rewardMoney;
+          if (sm.kind === 'bounty') {
+            this.player.bountiesCompleted = (this.player.bountiesCompleted || 0) + 1;
+          } else if (sm.kind === 'car_theft') {
+            this.player.carTheftsCompleted = (this.player.carTheftsCompleted || 0) + 1;
+          } else if (sm.kind === 'courier') {
+            this.player.faresCompleted = (this.player.faresCompleted || 0) + 1;
+          }
+          this.audio.playChime(true);
+          this.showToast(`Side Mission Passed: ${sm.title} (+৳${sm.rewardMoney})!`);
+          this.activeSideMission = null;
+          this.saveGame();
+          this.emitHud();
+        }
+      }
     }
 
     // Active story mission progression
@@ -2178,6 +3294,7 @@ export class DhakaGameEngine {
       rewardText += ` · Unlocked ${spec.name}!`;
     }
     this.showToast(rewardText);
+    this.saveGame();
 
     this.missionIdx += 1;
     this.stepIdx = 0;
@@ -2206,9 +3323,11 @@ export class DhakaGameEngine {
     const sunElev = Math.sin(dayPhase);
     const isNight = sunElev < -0.05;
 
-    // Snap shadow camera anchor to 2m grid to prevent directional shadow shimmer while moving
-    const snapX = Math.round(this.player.x / 2) * 2;
-    const snapZ = Math.round(this.player.z / 2) * 2;
+    // Sub-pixel shadow camera snapping to eliminate directional shadow shimmer while moving
+    const shadowFrustum = 168; // 2 * d (d = 84)
+    const texelSize = shadowFrustum / Math.max(512, this.qualityConfig.shadowMapSize);
+    const snapX = Math.round(this.player.x / texelSize) * texelSize;
+    const snapZ = Math.round(this.player.z / texelSize) * texelSize;
 
     if (!isNight) {
       const sunAngle = dayPhase;
@@ -2256,8 +3375,17 @@ export class DhakaGameEngine {
       _tmpSunColor.copy(_sunColorMoon);
     }
 
+    // Dynamic monsoon wetness accumulation & drying
+    const isRaining = this.weather === 'monsoon' || this.weather === 'storm';
+    const targetWetness = this.weather === 'storm' ? 1.0 : this.weather === 'monsoon' ? 0.78 : 0.0;
+    if (targetWetness > this.roadWetness) {
+      this.roadWetness = Math.min(targetWetness, this.roadWetness + (dt > 0 ? dt / 7.0 : 0.0));
+    } else {
+      this.roadWetness = Math.max(0.0, this.roadWetness - (dt > 0 ? dt / 35.0 : 0.0));
+    }
+    const rainWetness = this.roadWetness;
+
     // Blend monsoon/storm cloud cover over zenith & horizon
-    const rainWetness = this.weather === 'storm' ? 1.0 : this.weather === 'monsoon' ? 0.78 : 0.0;
     if (this.weather === 'monsoon') {
       _tmpZenith.lerp(_zenithStorm, 0.58);
       _tmpHorizon.lerp(_horizonStorm, 0.56);
@@ -2294,8 +3422,9 @@ export class DhakaGameEngine {
     (this.scene.background as THREE.Color).copy(_tmpHorizon);
     if (this.scene.fog instanceof THREE.FogExp2) {
       this.scene.fog.color.copy(_tmpHorizon);
-      this.scene.fog.density =
-        this.weather === 'storm' ? 0.0068 : this.weather === 'monsoon' ? 0.0052 : isNight ? 0.0038 : 0.0031;
+      const baseFog = isNight ? 0.0038 : (h < 7.8 || h > 16.5) ? 0.0034 : 0.0031;
+      const stormFog = this.weather === 'storm' ? 0.0072 : this.weather === 'monsoon' ? 0.0055 : baseFog;
+      this.scene.fog.density = THREE.MathUtils.lerp(baseFog, stormFog, Math.max(rainWetness, isRaining ? 1.0 : 0.0));
     }
 
     const nightFactor = isNight ? 1 : THREE.MathUtils.clamp(1 - sunElev * 2.8, 0, 1);
@@ -2331,16 +3460,21 @@ export class DhakaGameEngine {
     this.world.lampHaloMat.opacity = lampAlpha * 0.9;
     this.world.lampPoolMat.opacity = lampAlpha * (0.42 + rainWetness * 0.26);
 
-    // Wet Dhaka monsoon road sheen (matte clean tarmac when dry; glossy wet sheen when raining!)
-    const isWet = rainWetness > 0.05;
-    const targetRoadRough = THREE.MathUtils.lerp(0.88, 0.22, rainWetness);
-    const targetRoadMetal = THREE.MathUtils.lerp(0.04, 0.38, rainWetness);
-    const targetEnvBoost = THREE.MathUtils.lerp(0.65, 2.2, rainWetness);
+    // Wet Dhaka monsoon road sheen (matte clean tarmac when dry; glossy wet mirror sheen with puddle normal rims when wet!)
+    const isWet = rainWetness > 0.04;
+    const targetRoadRough = THREE.MathUtils.lerp(0.88, 0.18, rainWetness);
+    const targetRoadMetal = THREE.MathUtils.lerp(0.04, 0.42, rainWetness);
+    const targetEnvBoost = THREE.MathUtils.lerp(0.65, 2.4, rainWetness);
     _tmpRoadColor.lerpColors(_dryRoadColor, _wetRoadColor, rainWetness);
     for (const rMat of this.world.roadMaterials) {
-      const desiredRoughMap = isWet ? (rMat.userData.wetRoughnessMap as THREE.Texture | null) ?? null : null;
+      const desiredRoughMap = isWet ? (rMat.userData.wetRoughnessMap as THREE.Texture | null) ?? null : (rMat.userData.dryRoughnessMap as THREE.Texture | null) ?? null;
+      const desiredNormalMap = isWet ? (rMat.userData.wetNormalMap as THREE.Texture | null) ?? null : (rMat.userData.dryNormalMap as THREE.Texture | null) ?? null;
       if (rMat.roughnessMap !== desiredRoughMap) {
         rMat.roughnessMap = desiredRoughMap;
+        rMat.needsUpdate = true;
+      }
+      if (rMat.normalMap !== desiredNormalMap && desiredNormalMap !== null) {
+        rMat.normalMap = desiredNormalMap;
         rMat.needsUpdate = true;
       }
       rMat.roughness = targetRoadRough;
@@ -2360,6 +3494,11 @@ export class DhakaGameEngine {
     // Keep procedural Sky Dome centered on the active camera
     this.world.skyDome.position.copy(this.camera.position);
 
+    // Dynamically stream world chunks, apply frustum culling, and update LODs
+    if (this.world.chunkManager) {
+      this.world.chunkManager.update(this.camera.position, this.camera);
+    }
+
     // Gentle Buriganga boat bobbing & animated river/lake water ripple current
     const t = performance.now() * 0.001;
     for (const b of this.world.boats) {
@@ -2372,15 +3511,40 @@ export class DhakaGameEngine {
         wMat.bumpMap.offset.x = (wMat.bumpMap.offset.x + dt * 0.032) % 1;
         wMat.bumpMap.offset.y = (wMat.bumpMap.offset.y + dt * 0.015) % 1;
       }
+      if (wMat.normalMap) {
+        wMat.normalMap.offset.x = (wMat.normalMap.offset.x + dt * 0.024) % 1;
+        wMat.normalMap.offset.y = (wMat.normalMap.offset.y + dt * 0.018) % 1;
+      }
     }
 
-    // Monsoon rain streaks around active camera
+    // Tropical Dhaka vegetation wind sway (intensifying during monsoon and storms)
+    const windFreq = this.weather === 'storm' ? 3.4 : this.weather === 'monsoon' ? 2.1 : 1.1;
+    const windAmp = this.weather === 'storm' ? 0.08 : this.weather === 'monsoon' ? 0.045 : 0.02;
+    if (this.world.palmFrondInst) {
+      this.world.palmFrondInst.rotation.z = Math.sin(t * windFreq * 0.9) * windAmp * 1.6;
+      this.world.palmFrondInst.rotation.x = Math.cos(t * windFreq * 0.7) * windAmp * 1.2;
+    }
+    if (this.world.kcCanopyInst) {
+      this.world.kcCanopyInst.rotation.z = Math.sin(t * windFreq * 1.1 + 0.5) * windAmp * 0.9;
+    }
+    if (this.world.canopyInst) {
+      this.world.canopyInst.rotation.z = Math.sin(t * windFreq + 1.0) * windAmp * 0.7;
+    }
+
+    // Directional rain streaks, droplet particles & ground puddle ripples around active camera
     const raining = this.weather === 'monsoon' || this.weather === 'storm';
     this.world.rainPoints.visible = raining;
+    if (this.world.rainStreaks) {
+      this.world.rainStreaks.visible = raining;
+    }
+    if (this.world.rainSplashInst) {
+      this.world.rainSplashInst.visible = raining || this.roadWetness > 0.15;
+    }
+
     if (raining) {
       const arr = this.world.rainPositions;
-      const fallSpeed = this.weather === 'storm' ? 30 : 21;
-      const windX = this.weather === 'storm' ? 5.0 : 1.8;
+      const fallSpeed = this.weather === 'storm' ? 32 : 22;
+      const windX = this.weather === 'storm' ? 5.8 : 2.0;
       const cx = this.camera.position.x;
       const cz = this.camera.position.z;
       for (let i = 0; i < arr.length; i += 3) {
@@ -2393,6 +3557,53 @@ export class DhakaGameEngine {
         }
       }
       (this.world.rainPoints.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
+
+      if (this.world.rainStreaks) {
+        const posAttr = this.world.rainStreaks.geometry.attributes.position as THREE.BufferAttribute;
+        const sArr = posAttr.array as Float32Array;
+        const streakFall = this.weather === 'storm' ? 44 : 29;
+        const streakWind = this.weather === 'storm' ? 8.2 : 2.8;
+        for (let i = 0; i < sArr.length; i += 6) {
+          sArr[i] += streakWind * dt;
+          sArr[i + 1] -= streakFall * dt;
+          sArr[i + 3] += streakWind * dt;
+          sArr[i + 4] -= streakFall * dt;
+          if (sArr[i + 4] < 0) {
+            const rx = cx + (Math.random() - 0.5) * 76;
+            const ry = 22 + Math.random() * 8;
+            const rz = cz + (Math.random() - 0.5) * 76;
+            const len = 0.85 + Math.random() * 0.65;
+            sArr[i] = rx;
+            sArr[i + 1] = ry;
+            sArr[i + 2] = rz;
+            sArr[i + 3] = rx + streakWind * 0.025;
+            sArr[i + 4] = ry - len;
+            sArr[i + 5] = rz;
+          }
+        }
+        posAttr.needsUpdate = true;
+      }
+    }
+
+    // Animate ground puddle ripples
+    if (this.world.rainSplashInst && (raining || this.roadWetness > 0.15)) {
+      this.splashAnimTimer += dt;
+      const count = this.world.rainSplashInst.count;
+      const px = this.player.x;
+      const pz = this.player.z;
+      for (let i = 0; i < count; i++) {
+        const phase = (this.splashAnimTimer * 2.4 + i * 0.17) % 1.0;
+        const s = THREE.MathUtils.lerp(0.2, 1.35, phase);
+        const sx = px + Math.sin(i * 3.7) * (6 + (i % 24) * 0.8);
+        const sz = pz + Math.cos(i * 5.1) * (6 + (i % 24) * 0.8);
+        _vecA.set(sx, 0.056, sz);
+        _scaleVec.set(s, 1, s);
+        _mat4.compose(_vecA, _quat, _scaleVec);
+        this.world.rainSplashInst.setMatrixAt(i, _mat4);
+      }
+      this.world.rainSplashInst.instanceMatrix.needsUpdate = true;
+      const splashMat = this.world.rainSplashInst.material as THREE.MeshBasicMaterial;
+      splashMat.opacity = Math.min(0.65, this.roadWetness * 0.75);
     }
   }
 
@@ -2407,12 +3618,51 @@ export class DhakaGameEngine {
 
   private updateGameplayCamera(dt: number): void {
     const inVeh = Boolean(this.player.vehicleId);
-    const dist = inVeh ? 10.6 : 7.2;
-    const height = inVeh ? 4.2 : 3.2;
+    const veh = this.player.vehicleId ? this.vehicles.find((v) => v.id === this.player.vehicleId) : null;
+    let dist = inVeh ? 10.6 : 7.2;
+    let height = inVeh ? 4.2 : 3.2;
 
-    const targetX = this.player.x;
-    const targetY = this.player.y + (inVeh ? 1.65 : 1.55);
-    const targetZ = this.player.z;
+    if (veh) {
+      if (veh.kind === 'launch') {
+        dist = 18.5;
+        height = 8.2;
+      } else if (veh.kind === 'speedboat') {
+        dist = 10.2;
+        height = 3.6;
+      } else if (veh.kind === 'jetski') {
+        dist = 7.8;
+        height = 2.8;
+      }
+    }
+
+    // Contextual framing: Sprinting dynamic pull-back
+    const isSprinting = this.keysHeld.has('ShiftLeft') || this.keysHeld.has('ShiftRight');
+    if (!inVeh && isSprinting && Math.hypot(this.player.vx, this.player.vz) > 3.0) {
+      dist *= 1.14;
+      height *= 1.08;
+    }
+
+    // Contextual framing: Over-the-right-shoulder aiming
+    const isAiming = !inVeh && (this.mouseHeld || this.keysHeld.has('KeyQ'));
+    let shoulderOffsetX = 0;
+    let shoulderOffsetZ = 0;
+    if (isAiming) {
+      dist = 4.4;
+      height = 2.4;
+      shoulderOffsetX = Math.cos(this.camYaw) * 0.62;
+      shoulderOffsetZ = -Math.sin(this.camYaw) * 0.62;
+    }
+
+    // Velocity lead offset (+0.32s lead in movement direction)
+    const moveVx = veh ? Math.sin(veh.heading) * veh.speed : this.player.vx;
+    const moveVz = veh ? Math.cos(veh.heading) * veh.speed : this.player.vz;
+    const leadTime = inVeh ? 0.35 : 0.28;
+    const leadX = moveVx * leadTime;
+    const leadZ = moveVz * leadTime;
+
+    const targetX = this.player.x + shoulderOffsetX + leadX;
+    const targetY = this.player.y + (inVeh ? (veh?.kind === 'launch' ? 3.4 : 1.65) : 1.55);
+    const targetZ = this.player.z + shoulderOffsetZ + leadZ;
 
     const desiredX = targetX + Math.sin(this.camYaw) * Math.cos(this.camPitch) * dist;
     const desiredY = targetY + Math.sin(this.camPitch) * dist + height * 0.32;
@@ -2446,12 +3696,21 @@ export class DhakaGameEngine {
     this.camera.position.set(this.camPos.x + sx, Math.max(1.2, this.camPos.y + sy), this.camPos.z);
     this.camera.lookAt(this.camTarget.x, this.camTarget.y, this.camTarget.z);
 
-    // Subtle speed FOV kick when driving fast
-    const veh = this.player.vehicleId ? this.vehicles.find((v) => v.id === this.player.vehicleId) : null;
-    const targetFov = veh ? 58 + Math.min(14, Math.abs(veh.speed) * 0.45) : 58;
-    if (Math.abs(this.camera.fov - targetFov) > 0.1) {
-      this.camera.fov += (targetFov - this.camera.fov) * (1 - Math.exp(-6 * dt));
+    // Dynamic contextual FOV: tight weapon aiming vs fast vehicle driving
+    const baseFov = isAiming ? 52 : 58;
+    const speedFovBoost = veh ? Math.min(16, Math.abs(veh.speed) * 0.52) : 0;
+    const targetFov = baseFov + speedFovBoost;
+    if (Math.abs(this.camera.fov - targetFov) > 0.08) {
+      this.camera.fov += (targetFov - this.camera.fov) * (1 - Math.exp(-6.5 * dt));
       this.camera.updateProjectionMatrix();
+    }
+
+    // Dynamic banking camera roll into high-speed turns
+    if (veh && Math.abs(veh.steerAngle) > 0.02) {
+      const bank = -veh.steerAngle * Math.min(1.0, Math.abs(veh.speed) / 18) * 0.045;
+      this.camera.rotation.z += (bank - this.camera.rotation.z) * (1 - Math.exp(-8 * dt));
+    } else if (Math.abs(this.camera.rotation.z) > 0.001) {
+      this.camera.rotation.z *= Math.exp(-10 * dt);
     }
   }
 
@@ -2521,13 +3780,35 @@ export class DhakaGameEngine {
       if (Math.hypot(poi.x - this.player.x, poi.z - this.player.z) <= poi.radius + 2.0) {
         if (poi.kind === 'garage') return { prompt: `Open ${poi.name}`, key: 'G' };
         if (poi.kind === 'shop') return { prompt: `Enter ${poi.name}`, key: 'G' };
+        if (poi.kind === 'safehouse') {
+          const safeId = (poi.safehouseId ?? poi.id) as SafehouseId;
+          const spec = SAFEHOUSE_SPECS.find((s) => s.id === safeId);
+          const isOwned = this.player.unlockedSafehouses.includes(safeId);
+          return { prompt: `${isOwned ? 'Enter Safehouse' : 'Inspect Safehouse'}: ${spec?.name ?? poi.name}`, key: 'G' };
+        }
+        if (poi.kind === 'fuel_station') return { prompt: `Refuel at ${poi.name}`, key: 'G' };
+        if (poi.kind === 'dialogue_npc') return { prompt: poi.name, key: 'G' };
         if (poi.kind === 'tea_stall') return { prompt: `Drink Masala Cha at ${poi.name} (+25 HP)`, key: 'G' };
       }
     }
-    if (!this.player.vehicleId) {
+    if (this.player.vehicleId) {
+      const veh = this.vehicles.find((v) => v.id === this.player.vehicleId);
+      if (veh && isWatercraftKind(veh.kind)) {
+        const dock = getNearestRiverDock(veh.x, veh.z, 16.0);
+        if (dock) {
+          return { prompt: `Secure Berth at ${dock.name} (${dock.banglaName})`, key: 'G' };
+        }
+      }
+      const nearFuel = POIS.find((p) => p.kind === 'fuel_station' && Math.hypot(p.x - this.player.x, p.z - this.player.z) <= p.radius + 6.0);
+      if (nearFuel) {
+        return { prompt: `Pull into ${nearFuel.name} to Refuel`, key: 'G' };
+      }
+      return { prompt: isWatercraftKind(veh?.kind ?? 'sedan') ? 'Disembark [F]' : 'Exit Vehicle [F]', key: 'F' };
+    } else {
       const nearVeh = this.getActiveOrNearestVehicle(5.6);
       if (nearVeh) {
-        return { prompt: `Drive ${VEHICLE_SPECS[nearVeh.kind].name}`, key: 'F' };
+        const action = isWatercraftKind(nearVeh.kind) ? 'Board' : nearVeh.driver === 'traffic' ? 'Carjack' : 'Drive';
+        return { prompt: `${action} ${VEHICLE_SPECS[nearVeh.kind].name}`, key: 'F' };
       }
     }
     return { prompt: null, key: null };
@@ -2542,10 +3823,17 @@ export class DhakaGameEngine {
     const step = mission?.steps[this.stepIdx];
     const { prompt, key } = this.computeInteractPrompt();
 
+    const fuel = Math.round(veh ? (veh.fuel ?? 100) : 100);
+    const maxFuel = Math.round(veh ? (veh.maxFuel ?? 100) : 100);
+    const fuelRatio = veh ? (veh.fuel ?? 100) / (veh.maxFuel ?? 100) : 1.0;
+    const isLowFuel = Boolean(veh && (veh.fuel ?? 100) < 20);
+
     const blips: MinimapBlip[] = [];
     POIS.forEach((p) => {
       if (p.kind === 'garage') blips.push({ x: p.x, z: p.z, kind: 'garage' });
       if (p.kind === 'shop') blips.push({ x: p.x, z: p.z, kind: 'shop' });
+      if (p.kind === 'safehouse') blips.push({ x: p.x, z: p.z, kind: 'safehouse' });
+      if (p.kind === 'fuel_station') blips.push({ x: p.x, z: p.z, kind: 'fuel' });
     });
     if (step) {
       blips.push({ x: step.targetX, z: step.targetZ, kind: 'mission' });
@@ -2553,11 +3841,14 @@ export class DhakaGameEngine {
     if (this.fare.active) {
       blips.push({ x: this.fare.destX, z: this.fare.destZ, kind: 'fare' });
     }
+    if (this.activeSideMission) {
+      blips.push({ x: this.activeSideMission.targetX, z: this.activeSideMission.targetZ, kind: 'mission' });
+    }
     for (const n of this.npcs) {
       if (n.state === 'ko') continue;
       if (n.role === 'police' && this.player.wantedLevel > 0) {
         blips.push({ x: n.x, z: n.z, kind: 'police' });
-      } else if (n.role === 'syndicate' || n.role === 'boss') {
+      } else if (n.role === 'syndicate' || n.role === 'boss' || n.missionTag === 'side_bounty_target') {
         blips.push({ x: n.x, z: n.z, kind: 'enemy' });
       }
     }
@@ -2597,6 +3888,13 @@ export class DhakaGameEngine {
       vehicleSpeedKmh: veh ? Math.round(Math.abs(veh.speed) * 3.6) : 0,
       vehicleHp: veh ? Math.round(veh.hp) : 0,
       vehicleMaxHp: veh ? veh.maxHp : 100,
+      fuel,
+      maxFuel,
+      fuelRatio,
+      isLowFuel,
+      isWatercraft: Boolean(veh && isWatercraftKind(veh.kind)),
+      isSwimming: Boolean(this.player.isSwimming),
+      nearDockName: getNearestRiverDock(this.player.x, this.player.z, 24.0)?.banglaName ?? null,
       weapon: w,
       unlockedWeapons: [...this.player.unlockedWeapons],
       magAmmo: this.player.magAmmo[w] ?? 0,
@@ -2604,6 +3902,8 @@ export class DhakaGameEngine {
       reloading: this.player.reloadTimer > 0,
       outfit: this.player.outfit,
       unlockedOutfits: [...this.player.unlockedOutfits],
+      unlockedSafehouses: [...this.player.unlockedSafehouses],
+      inventory: this.player.inventory.map((i) => ({ ...i })),
       interactPrompt: prompt,
       interactKey: key,
       missionTitle: mission ? mission.title : null,
@@ -2614,9 +3914,18 @@ export class DhakaGameEngine {
       fareActive: this.fare.active,
       fareText: this.fare.active ? `Drop ${this.fare.passengerName} at ${this.fare.destLabel}` : null,
       fareTimer: Math.ceil(this.fare.timer),
+      activeSideMission: this.activeSideMission ? { ...this.activeSideMission } : null,
+      activeConversation: this.activeConversation ? { ...this.activeConversation } : null,
+      safehouseName: this.activeSafehouseId ? SAFEHOUSE_SPECS.find((s) => s.id === this.activeSafehouseId)?.name ?? null : null,
+      hasSaveGame: this.hasSaveGame,
       dialogue: this.dialogue ? { ...this.dialogue } : null,
       toast: this.toastMsg,
       muted: this.audio.isMuted(),
+      multiplayerActive: Boolean(this.netClient && this.netClient.isConnected()),
+      multiplayerPing: this.multiplayerPing,
+      multiplayerPlayerCount: this.multiplayerPlayerCount,
+      multiplayerKillfeed: this.killfeed.map((k) => ({ ...k })),
+      multiplayerChat: this.chatMessages.map((c) => ({ ...c })),
       playerX: this.player.x,
       playerZ: this.player.z,
       playerHeading: this.player.heading,
@@ -2626,6 +3935,8 @@ export class DhakaGameEngine {
         missionsCompleted: this.player.missionsCompleted,
         totalMissions: STORY_MISSIONS.length,
         faresCompleted: this.player.faresCompleted,
+        bountiesCompleted: this.player.bountiesCompleted ?? 0,
+        carTheftsCompleted: this.player.carTheftsCompleted ?? 0,
         playTimeSec: Math.round(this.playTimeSec),
         cause: this.gameOverCause,
       },
@@ -2634,6 +3945,7 @@ export class DhakaGameEngine {
 
   public dispose(): void {
     this.disposed = true;
+    this.disconnectMultiplayer();
     cancelAnimationFrame(this.frameId);
     clearTimeout(this.frameId);
     this.resizeObserver.disconnect();
@@ -2646,10 +3958,21 @@ export class DhakaGameEngine {
     this.renderer.domElement.removeEventListener('mousedown', this.onMouseDown);
     this.renderer.domElement.removeEventListener('contextmenu', this.onContextMenu);
     this.playerRig.animator.disposeMixer();
-    this.npcRigs.forEach((rig) => rig.animator.disposeMixer());
+    this.npcRigs.forEach((rig) => {
+      this.scene.remove(rig.group);
+      rig.animator.disposeMixer();
+    });
+    this.vehicleRigs.forEach((rig) => {
+      this.scene.remove(rig.group);
+    });
     this.world.disposables.forEach((d) => d.dispose());
+    this.trafficLights.dispose();
     this.textures.dispose();
     this.audio.dispose();
+    this.scene.clear();
     this.renderer.dispose();
+    if (this.renderer.domElement && this.renderer.domElement.parentElement) {
+      this.renderer.domElement.parentElement.removeChild(this.renderer.domElement);
+    }
   }
 }

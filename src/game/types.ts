@@ -14,7 +14,21 @@ export type DistrictId =
   | 'uttara_north'
   | 'mirpur_market';
 
-export type VehicleKind = 'cng' | 'rickshaw' | 'sedan' | 'bus' | 'truck' | 'bike' | 'police';
+export type VehicleKind =
+  | 'cng'
+  | 'rickshaw'
+  | 'sedan'
+  | 'bus'
+  | 'truck'
+  | 'bike'
+  | 'police'
+  | 'launch'
+  | 'speedboat'
+  | 'jetski';
+
+export function isWatercraftKind(kind: VehicleKind): boolean {
+  return kind === 'launch' || kind === 'speedboat' || kind === 'jetski';
+}
 
 export type WeaponId = 'fists' | 'pistol' | 'smg' | 'shotgun';
 
@@ -26,7 +40,130 @@ export type OutfitId = 'street' | 'panjabi' | 'gulshan' | 'monsoon';
 
 export type EnemyPolicy = 'chaser' | 'ranged' | 'flanker';
 
-export type InteractModalKind = 'none' | 'garage' | 'shop' | 'wardrobe';
+export type InteractModalKind =
+  | 'none'
+  | 'garage'
+  | 'shop'
+  | 'wardrobe'
+  | 'safehouse'
+  | 'fuel_station'
+  | 'dialogue'
+  | 'multiplayer_lobby';
+
+export type SafehouseId = 'old_dhaka_rooftop' | 'gulshan_penthouse' | 'dhanmondi_hideout';
+
+export interface SafehouseSpec {
+  id: SafehouseId;
+  name: string;
+  banglaName: string;
+  district: DistrictId;
+  x: number;
+  z: number;
+  radius: number;
+  price: number;
+  unlocked: boolean;
+  description?: string;
+}
+
+export interface VehicleCustomization {
+  engineStage: number; // 0..3 (+10%, +20%, +35% speed & accel)
+  brakesStage: number; // 0..2 (+25%, +50% braking power)
+  hasTurbo: boolean; // Turbo whistle & +15% torque
+  hasSpoiler: boolean; // Downforce + improved drift stability
+  tintLevel: number; // 0 = clear, 1 = smoke, 2 = limo dark
+  neonColor?: number | null; // Underglow hex color
+  plateJammer: boolean; // Clears heat on vehicle entry
+}
+
+export interface InventoryItem {
+  id: string;
+  name: string;
+  banglaName: string;
+  kind: 'food' | 'medical' | 'tool' | 'fuel' | 'contraband';
+  count: number;
+  value: number;
+  description: string;
+}
+
+export type SideMissionKind = 'fare' | 'car_theft' | 'bounty' | 'courier';
+
+export interface SideMissionState {
+  id: string;
+  kind: SideMissionKind;
+  title: string;
+  banglaTitle: string;
+  giver: string;
+  objective: string;
+  targetX: number;
+  targetZ: number;
+  targetRadius: number;
+  targetVehicleKind?: VehicleKind;
+  targetKillsRequired?: number;
+  rewardMoney: number;
+  rewardItem?: InventoryItem;
+  timer: number;
+  maxTimer: number;
+  step?: number;
+}
+
+export interface DialogueOption {
+  id: string;
+  label: string;
+  banglaLabel: string;
+  action: 'job' | 'rumor' | 'heal' | 'trade' | 'leave';
+  param?: string;
+}
+
+export interface InteractiveNpcConversation {
+  npcId: string;
+  npcName: string;
+  npcBanglaName: string;
+  role: string;
+  greetingBangla: string;
+  greetingEnglish: string;
+  options: DialogueOption[];
+}
+
+export interface DhakaSaveGameData {
+  version: number;
+  timestamp: number;
+  player: {
+    x: number;
+    y: number;
+    z: number;
+    heading: number;
+    hp: number;
+    armor: number;
+    stamina: number;
+    money: number;
+    wantedLevel: number;
+    weapon: WeaponId;
+    unlockedWeapons: WeaponId[];
+    ammo: Record<WeaponId, number>;
+    outfit: OutfitId;
+    unlockedOutfits: OutfitId[];
+    unlockedSafehouses: SafehouseId[];
+    inventory: InventoryItem[];
+  };
+  missions: {
+    missionIdx: number;
+    stepIdx: number;
+    missionsCompleted: number;
+    faresCompleted: number;
+    bountiesCompleted: number;
+    carTheftsCompleted: number;
+  };
+  world: {
+    timeOfDay: number;
+    weather: WeatherMode;
+    playTimeSec: number;
+  };
+  ownedVehicles: Array<{
+    kind: VehicleKind;
+    color: number;
+    customization: VehicleCustomization;
+  }>;
+}
 
 export interface Vec2 {
   x: number;
@@ -106,6 +243,37 @@ export interface VehicleState {
   honkTimer: number;
   sirenOn: boolean;
   damagedSmoke: boolean;
+  // --- Enhanced realistic vehicle dynamics ---
+  vx?: number; // World X velocity (m/s)
+  vz?: number; // World Z velocity (m/s)
+  lateralSlip?: number; // Lateral tire slip velocity (m/s)
+  pitch?: number; // Suspension pitch angle (rad, squat/dive)
+  roll?: number; // Suspension roll angle (rad, body lean / bike banking)
+  wheelRotation?: number; // Cumulative wheel spin angle (rad)
+  isBraking?: boolean; // True when braking or handbrake active
+  isReversing?: boolean; // True when reverse gear active
+  isDrifting?: boolean; // True when tire slip exceeds grip threshold
+  // --- Believable living traffic simulation fields ---
+  laneOffset?: number; // Current lateral lane offset in road corridor (-1 = left slow shoulder, 0 = main lane, +1 = overtaking right)
+  targetLaneOffset?: number; // Desired lane offset for smooth lane-change transitions
+  isOvertaking?: boolean; // Currently performing an overtaking maneuver around a slower vehicle
+  overtakeTimer?: number; // Time elapsed in current overtake maneuver
+  waitTimer?: number; // Time paused (at traffic light, bus stop, or in congestion queue)
+  busStopTimer?: number; // For city buses paused at designated passenger stops
+  stoppedAtRed?: boolean; // True when halted at red signal
+  // --- Watercraft dynamics & docking ---
+  buoyancyVy?: number; // Vertical buoyancy velocity (m/s)
+  isWatercraft?: boolean; // True for launches, speedboats, and jet skis
+  isPlaning?: boolean; // True when hull lifts out of water at high speed
+  dockedAt?: string | null; // Id of berth if currently docked
+  wakeTimer?: number; // Internal timer for wake and splash generation
+  // --- Fuel & Customization ---
+  fuel?: number; // 0..100
+  maxFuel?: number; // 100
+  fuelType?: 'petrol' | 'cng' | 'diesel';
+  customization?: VehicleCustomization;
+  isStalled?: boolean;
+  stoleFromNpc?: boolean;
 }
 
 export interface PlayerState {
@@ -138,10 +306,15 @@ export interface PlayerState {
   attackCooldown: number;
   outfit: OutfitId;
   unlockedOutfits: OutfitId[];
+  unlockedSafehouses: SafehouseId[];
+  inventory: InventoryItem[];
   kills: number;
   missionsCompleted: number;
   faresCompleted: number;
+  bountiesCompleted: number;
+  carTheftsCompleted: number;
   distanceDriven: number;
+  isSwimming?: boolean;
 }
 
 export interface NpcState {
@@ -158,7 +331,19 @@ export interface NpcState {
   hp: number;
   maxHp: number;
   speed: number;
-  state: 'idle' | 'walk' | 'flee' | 'chase' | 'windup' | 'attack' | 'ko';
+  state:
+  | 'idle'
+  | 'walk'
+  | 'flee'
+  | 'chase'
+  | 'windup'
+  | 'attack'
+  | 'ko'
+  | 'waiting_to_cross'
+  | 'crossing'
+  | 'chatting'
+  | 'browsing_shop'
+  | 'waiting_bus';
   stateTimer: number;
   windupDuration: number;
   attackCooldown: number;
@@ -171,6 +356,14 @@ export interface NpcState {
   missionTag?: string;
   hasAttackToken: boolean;
   strafeDir: number;
+  // --- Believable living pedestrian simulation fields ---
+  pedestrianZone?: 'sidewalk' | 'crossing' | 'plaza' | 'shop' | 'bazaar';
+  socialPartnerId?: string; // ID of partner when chatting
+  crossLookTimer?: number; // Timer for turning head to check traffic
+  hurrying?: boolean; // Jogging/hurrying when car approaches
+  dangerSourceX?: number; // Origin of gunfire or explosion
+  dangerSourceZ?: number;
+  dangerLevel?: number;
 }
 
 export interface MissionStep {
@@ -221,7 +414,7 @@ export interface ActiveDialogue {
 export interface MinimapBlip {
   x: number;
   z: number;
-  kind: 'mission' | 'garage' | 'shop' | 'police' | 'enemy' | 'vehicle' | 'fare';
+  kind: 'mission' | 'garage' | 'shop' | 'police' | 'enemy' | 'vehicle' | 'fare' | 'safehouse' | 'fuel';
 }
 
 export interface LiveWeatherHudState {
@@ -279,6 +472,13 @@ export interface HudSnapshot {
   vehicleSpeedKmh: number;
   vehicleHp: number;
   vehicleMaxHp: number;
+  fuel: number;
+  maxFuel: number;
+  fuelRatio: number;
+  isLowFuel: boolean;
+  isWatercraft?: boolean;
+  isSwimming?: boolean;
+  nearDockName?: string | null;
   weapon: WeaponId;
   unlockedWeapons: WeaponId[];
   magAmmo: number;
@@ -286,6 +486,8 @@ export interface HudSnapshot {
   reloading: boolean;
   outfit: OutfitId;
   unlockedOutfits: OutfitId[];
+  unlockedSafehouses: SafehouseId[];
+  inventory: InventoryItem[];
   interactPrompt: string | null;
   interactKey: string | null;
   missionTitle: string | null;
@@ -295,9 +497,18 @@ export interface HudSnapshot {
   fareActive: boolean;
   fareText: string | null;
   fareTimer: number;
+  activeSideMission: SideMissionState | null;
+  activeConversation: InteractiveNpcConversation | null;
+  safehouseName?: string | null;
+  hasSaveGame: boolean;
   dialogue: ActiveDialogue | null;
   toast: string | null;
   muted: boolean;
+  multiplayerActive: boolean;
+  multiplayerPing: number;
+  multiplayerPlayerCount: number;
+  multiplayerKillfeed: Array<{ id: string; text: string; timer: number }>;
+  multiplayerChat: Array<{ id: string; sender: string; text: string; isSystem: boolean }>;
   playerX: number;
   playerZ: number;
   playerHeading: number;
@@ -307,6 +518,8 @@ export interface HudSnapshot {
     missionsCompleted: number;
     totalMissions: number;
     faresCompleted: number;
+    bountiesCompleted: number;
+    carTheftsCompleted: number;
     playTimeSec: number;
     cause: string;
   };
@@ -430,6 +643,57 @@ export const VEHICLE_SPECS: Record<VehicleKind, VehicleSpec> = {
     halfWidth: 1.12,
     halfLength: 2.45,
     defaultColor: 0xf1f5f9,
+    canDrift: true,
+  },
+  launch: {
+    kind: 'launch',
+    name: 'Sadarghat Passenger Launch',
+    banglaName: 'সদরঘাট যাত্রীবাহী লঞ্চ',
+    maxSpeed: 12.0,
+    reverseSpeed: 4.5,
+    accel: 2.8,
+    brake: 4.8,
+    turnRate: 0.52,
+    drag: 0.85,
+    maxHp: 850,
+    mass: 14.0,
+    halfWidth: 3.4,
+    halfLength: 11.0,
+    defaultColor: 0x0f5132,
+    canDrift: false,
+  },
+  speedboat: {
+    kind: 'speedboat',
+    name: 'Buriganga River Speedboat',
+    banglaName: 'বুড়িগঙ্গা স্পিডবোট',
+    maxSpeed: 24.5,
+    reverseSpeed: 7.0,
+    accel: 16.5,
+    brake: 22.0,
+    turnRate: 1.95,
+    drag: 1.15,
+    maxHp: 220,
+    mass: 1.4,
+    halfWidth: 1.35,
+    halfLength: 3.4,
+    defaultColor: 0xd97706,
+    canDrift: true,
+  },
+  jetski: {
+    kind: 'jetski',
+    name: 'Wave Runner Jet Ski',
+    banglaName: 'ওয়েভরানার জেট স্কি',
+    maxSpeed: 29.0,
+    reverseSpeed: 6.0,
+    accel: 21.0,
+    brake: 26.0,
+    turnRate: 2.65,
+    drag: 1.35,
+    maxHp: 160,
+    mass: 0.55,
+    halfWidth: 0.75,
+    halfLength: 1.65,
+    defaultColor: 0x2563eb,
     canDrift: true,
   },
 };

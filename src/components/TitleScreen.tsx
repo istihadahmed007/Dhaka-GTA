@@ -4,9 +4,19 @@ interface TitleScreenProps {
   onStart: () => void;
   muted: boolean;
   onToggleMute: () => void;
+  hasSaveGame?: boolean;
+  onContinue?: () => void;
+  onStartMultiplayer?: () => void;
 }
 
-export const TitleScreen: React.FC<TitleScreenProps> = ({ onStart, muted, onToggleMute }) => {
+export const TitleScreen: React.FC<TitleScreenProps> = ({
+  onStart,
+  muted,
+  onToggleMute,
+  hasSaveGame,
+  onContinue,
+  onStartMultiplayer,
+}) => {
   return (
     <div className="fixed inset-0 z-20 pointer-events-none flex flex-col justify-between p-6 sm:p-10 md:p-14">
       {/* Subtle left-side dark scrim for guaranteed typography contrast over live 3D Dhaka flyover */}
@@ -104,7 +114,24 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({ onStart, muted, onTogg
           </text>
         </svg>
 
-        <div className="mt-8 flex items-center gap-4">
+        <div className="mt-8 flex flex-wrap items-center gap-4">
+          {hasSaveGame && onContinue && (
+            <button
+              type="button"
+              data-testid="continue-game"
+              onClick={(e) => {
+                e.currentTarget.blur();
+                onContinue();
+              }}
+              className="pointer-events-auto group flex items-center gap-3 px-8 py-4 bg-[#1e293b] hover:bg-[#334155] text-[#34d399] font-display text-2xl font-extrabold uppercase tracking-[0.14em] border-b-4 border-[#34d399] shadow-[0_10px_28px_rgba(0,0,0,0.65)] transition-transform active:translate-y-0.5 cursor-pointer"
+            >
+              <span>CONTINUE SAVED GAME</span>
+              <svg viewBox="0 0 24 24" className="w-6 h-6 fill-current transition-transform group-hover:translate-x-1" aria-hidden="true">
+                <path d="M8 5v14l11-7z" />
+              </svg>
+            </button>
+          )}
+
           <button
             type="button"
             data-start="true"
@@ -114,11 +141,28 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({ onStart, muted, onTogg
             }}
             className="pointer-events-auto group flex items-center gap-3 px-8 py-4 bg-[#0f7a53] hover:bg-[#149465] active:bg-[#0c6242] text-[#faf7f0] font-display text-2xl font-extrabold uppercase tracking-[0.14em] border-b-4 border-[#e6a135] shadow-[0_10px_28px_rgba(0,0,0,0.65)] transition-transform active:translate-y-0.5 cursor-pointer"
           >
-            <span>ENTER DHAKA</span>
+            <span>{hasSaveGame ? 'NEW GAME' : 'ENTER DHAKA'}</span>
             <svg viewBox="0 0 24 24" className="w-6 h-6 fill-current transition-transform group-hover:translate-x-1" aria-hidden="true">
               <path d="M8 5v14l11-7z" />
             </svg>
           </button>
+
+          {onStartMultiplayer && (
+            <button
+              type="button"
+              data-testid="start-multiplayer"
+              onClick={(e) => {
+                e.currentTarget.blur();
+                onStartMultiplayer();
+              }}
+              className="pointer-events-auto group flex items-center gap-3 px-8 py-4 bg-[#1e1b4b] hover:bg-[#312e81] active:bg-[#1e1b4b] text-[#c084fc] font-display text-2xl font-extrabold uppercase tracking-[0.14em] border-b-4 border-[#a855f7] shadow-[0_10px_28px_rgba(0,0,0,0.65)] transition-transform active:translate-y-0.5 cursor-pointer"
+            >
+              <span>MULTIPLAYER (ONLINE)</span>
+              <svg viewBox="0 0 24 24" className="w-6 h-6 fill-current transition-transform group-hover:translate-x-1" aria-hidden="true">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z" />
+              </svg>
+            </button>
+          )}
         </div>
       </div>
 

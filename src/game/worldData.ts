@@ -1,4 +1,14 @@
-import { AabbCollider, DistrictId, MissionDefinition, Vec2, VehicleKind } from './types';
+import {
+  AabbCollider,
+  DistrictId,
+  InteractiveNpcConversation,
+  MissionDefinition,
+  SafehouseId,
+  SafehouseSpec,
+  SideMissionState,
+  Vec2,
+  VehicleKind,
+} from './types';
 
 // Expanded ~2.5x linear dimensions from original (108 -> 270, river 80 -> 200)
 export const WORLD_HALF_SIZE = 270; // Playable X: [-270..270] (540m), Z: [-270..200] (470m)
@@ -13,7 +23,11 @@ export type BuildingStyle =
   | 'market_hall'
   | 'police'
   | 'garage'
-  | 'shop';
+  | 'shop'
+  | 'pink_palace'
+  | 'mughal_fort'
+  | 'national_mosque'
+  | 'metro_station';
 
 export interface BuildingSpec {
   id: string;
@@ -35,12 +49,21 @@ export interface BuildingSpec {
 
 export interface PoiLocation {
   id: string;
-  kind: 'garage' | 'shop' | 'police_hq' | 'tea_stall' | 'sadarghat_pier';
+  kind:
+    | 'garage'
+    | 'shop'
+    | 'police_hq'
+    | 'tea_stall'
+    | 'sadarghat_pier'
+    | 'safehouse'
+    | 'fuel_station'
+    | 'dialogue_npc';
   name: string;
   banglaName: string;
   x: number;
   z: number;
   radius: number;
+  safehouseId?: SafehouseId;
 }
 
 export type RoadTier = 'avenue' | 'boulevard' | 'street' | 'alley';
@@ -105,7 +128,8 @@ export const LAKE_ZONES: LakeZone[] = [
 // Secondary Streets & Old Dhaka / Motijheel / Mirpur connector alleys (8m)
 export const ROAD_SEGMENTS: RoadSegment[] = [
   // Tier 1: Central Grand Avenues
-  { id: 'ave_ns_central', x1: 0, z1: -244, x2: 0, z2: 192, width: 16, tier: 'avenue' },
+  { id: 'ave_metro_line6', x1: 0, z1: -244, x2: 0, z2: -144, width: 16, tier: 'avenue' },
+  { id: 'ave_ns_central', x1: 0, z1: -144, x2: 0, z2: 192, width: 16, tier: 'avenue' },
   { id: 'ave_ew_central', x1: -244, z1: 0, x2: 244, z2: 0, width: 16, tier: 'avenue' },
 
   // Tier 2: Inner & Outer North-South Boulevards
@@ -129,11 +153,158 @@ export const ROAD_SEGMENTS: RoadSegment[] = [
   // Tier 3/4: Secondary District Streets & Old Dhaka Market Alleys
   { id: 'alley_old_dhaka_1', x1: -104, z1: 64, x2: -104, z2: 186, width: 8, tier: 'alley' },
   { id: 'alley_old_dhaka_2', x1: -144, z1: 104, x2: -64, z2: 104, width: 8, tier: 'alley' },
+  { id: 'alley_ahsan_manzil', x1: -84, z1: 144, x2: -84, z2: 152, width: 7, tier: 'alley' },
+  { id: 'street_lalbagh_approach', x1: -188, z1: 64, x2: -188, z2: 108, width: 8, tier: 'street' },
   { id: 'street_motijheel_1', x1: 104, z1: 0, x2: 104, z2: 144, width: 9, tier: 'street' },
   { id: 'street_motijheel_2', x1: 64, z1: 104, x2: 224, z2: 104, width: 9, tier: 'street' },
   { id: 'street_gulshan_n', x1: 104, z1: -224, x2: 104, z2: -64, width: 9, tier: 'street' },
   { id: 'street_mirpur_1', x1: -104, z1: -224, x2: -104, z2: -64, width: 9, tier: 'street' },
   { id: 'street_dhanmondi_s', x1: -224, z1: 104, x2: -144, z2: 104, width: 9, tier: 'street' },
+];
+
+export const SAFEHOUSE_SPECS: SafehouseSpec[] = [
+  {
+    id: 'old_dhaka_rooftop',
+    name: "Tariq's Old Dhaka Rooftop Apartment",
+    banglaName: 'তারেকের পুরান ঢাকা ফ্ল্যাট',
+    district: 'old_dhaka',
+    x: -28,
+    z: 48,
+    radius: 6.5,
+    price: 0,
+    unlocked: true,
+    description: 'Cozy rooftop hideout above Shakhari Bazar with panoramic views of Old Dhaka alleys.',
+  },
+  {
+    id: 'gulshan_penthouse',
+    name: 'Gulshan Luxury Penthouse',
+    banglaName: 'গুলশান লাক্সারি পেন্টহাউস',
+    district: 'gulshan',
+    x: 42,
+    z: -52,
+    radius: 7.0,
+    price: 15000,
+    unlocked: false,
+    description: 'High-security diplomatic enclave penthouse with armored underground garage bay.',
+  },
+  {
+    id: 'dhanmondi_hideout',
+    name: 'Dhanmondi Lakefront Safehouse',
+    banglaName: 'ধানমন্ডি লেক সেফহাউস',
+    district: 'dhanmondi',
+    x: -172,
+    z: 36,
+    radius: 6.5,
+    price: 8500,
+    unlocked: false,
+    description: 'Quiet lakeside villa with fast access to Mirpur and Satmasjid commercial road.',
+  },
+];
+
+export const AVAILABLE_SIDE_MISSIONS: SideMissionState[] = [
+  {
+    id: 'side_theft_sedan',
+    kind: 'car_theft',
+    title: 'Chop Shop: Luxury Sedan Contract',
+    banglaTitle: 'গাড়ি চুরি: লাক্সারি সেডান',
+    giver: 'Babu',
+    objective: 'Steal a Luxury Sedan in good condition and deliver to Dhaka Customs Garage',
+    targetX: 34,
+    targetZ: -26,
+    targetRadius: 9.0,
+    targetVehicleKind: 'sedan',
+    rewardMoney: 2200,
+    timer: 180,
+    maxTimer: 180,
+  },
+  {
+    id: 'side_theft_police',
+    kind: 'car_theft',
+    title: 'High Risk: DMP Patrol Car Snatch',
+    banglaTitle: 'পুলিশ পিকআপ ছিনতাই',
+    giver: 'Rafiq Bhai',
+    objective: 'Steal a DMP Police Pickup, shake off the wanted heat, and deliver to Motijheel Works',
+    targetX: 162,
+    targetZ: 26,
+    targetRadius: 9.0,
+    targetVehicleKind: 'police',
+    rewardMoney: 3600,
+    timer: 210,
+    maxTimer: 210,
+  },
+  {
+    id: 'side_bounty_mirpur',
+    kind: 'bounty',
+    title: 'Vigilante: Neutralize Mirpur Racketeers',
+    banglaTitle: 'মিরপুর গ্যাং দমন',
+    giver: 'Rafiq Bhai',
+    objective: 'Hunt down and eliminate the 4 Syndicate racketeers terrorizing Mirpur Market',
+    targetX: -140,
+    targetZ: -90,
+    targetRadius: 18.0,
+    targetKillsRequired: 4,
+    rewardMoney: 2900,
+    timer: 240,
+    maxTimer: 240,
+  },
+  {
+    id: 'side_courier_buriganga',
+    kind: 'courier',
+    title: 'Water Courier: Sadarghat Speedboat Drop',
+    banglaTitle: 'বুড়িগঙ্গা স্পিডবোট পার্সেল',
+    giver: 'Wharf Master',
+    objective: 'Pilot a Speedboat across Buriganga River to deliver priority cargo to Keraniganj Pier',
+    targetX: 78,
+    targetZ: 215,
+    targetRadius: 12.0,
+    targetVehicleKind: 'speedboat',
+    rewardMoney: 2100,
+    timer: 150,
+    maxTimer: 150,
+  },
+];
+
+export const INTERACTIVE_NPCS: InteractiveNpcConversation[] = [
+  {
+    npcId: 'npc_rafiq',
+    npcName: 'Rafiq Bhai',
+    npcBanglaName: 'রফিক ভাই',
+    role: 'Old Dhaka Cha Master & Syndicate Informant',
+    greetingBangla: 'তারেক! আয় এক কাপ গরম মসলা চা খা। রাস্তার খবর লাগলে বল।',
+    greetingEnglish: 'Tariq! Have a hot cup of masala cha. Tell me if you need street intelligence.',
+    options: [
+      { id: 'opt_job', label: 'Got any paying street contracts?', banglaLabel: 'কোনো কাজের খবর আছে?', action: 'job', param: 'bounty' },
+      { id: 'opt_rumor', label: 'What is the Padma Syndicate plotting?', banglaLabel: 'পদ্মা সিন্ডিকেটের খবর কী?', action: 'rumor' },
+      { id: 'opt_heal', label: 'Drink Hot Masala Cha (৳40 · Restores 35 HP & Stamina)', banglaLabel: 'গরম মসলা চা খাও (৳৪০)', action: 'heal', param: '40' },
+      { id: 'opt_leave', label: 'I will see you on the avenue, Bhai.', banglaLabel: 'পরে দেখা হবে ভাই।', action: 'leave' },
+    ],
+  },
+  {
+    npcId: 'npc_babu',
+    npcName: 'Babu',
+    npcBanglaName: 'বাবু',
+    role: 'Hardware Store Owner & Chop Shop Contact',
+    greetingBangla: 'টাকা থাকলে সব মিলবে। বন্দুক, বর্ম, বিরিয়ানি—কি চাস বল?',
+    greetingEnglish: 'If you have Taka, everything is on the table. Guns, vests, hot food—what do you need?',
+    options: [
+      { id: 'opt_shop', label: 'Browse Hardware & Weapons Stock', banglaLabel: 'দোকানের জিনিসপত্র দেখাও', action: 'trade', param: 'shop' },
+      { id: 'opt_chop', label: 'Any chop shop vehicle contracts?', banglaLabel: 'কোনো গাড়ি তোলার কন্ট্রাক্ট আছে?', action: 'job', param: 'car_theft' },
+      { id: 'opt_leave', label: 'Just passing through.', banglaLabel: 'এমনি এলাম।', action: 'leave' },
+    ],
+  },
+  {
+    npcId: 'npc_nadia',
+    npcName: 'Nadia Rahman',
+    npcBanglaName: 'নাদিয়া রহমান',
+    role: 'Underground Investigator & Safehouse Coordinator',
+    greetingBangla: 'তারেক, পুলিশ আর সিন্ডিকেট দুটোই এখন আমাদের খুঁজছে। সাবধান থেকো।',
+    greetingEnglish: 'Tariq, both DMP and the Syndicate are hunting us. Stay sharp on these avenues.',
+    options: [
+      { id: 'opt_safehouse', label: 'Rest & access Safehouse Locker', banglaLabel: 'সেফহাউস ও বিশ্রাম', action: 'trade', param: 'safehouse' },
+      { id: 'opt_intel', label: 'Review DMP Police Patrol Alerts', banglaLabel: 'পুলিশ অ্যালার্ট রিপোর্ট', action: 'rumor' },
+      { id: 'opt_leave', label: 'I am heading out.', banglaLabel: 'আমি বের হচ্ছি।', action: 'leave' },
+    ],
+  },
 ];
 
 export const POIS: PoiLocation[] = [
@@ -148,6 +319,21 @@ export const POIS: PoiLocation[] = [
   { id: 'garage_motijheel', kind: 'garage', name: 'Motijheel Auto Works', banglaName: 'মতিঝিল অটো ওয়ার্কস', x: 162, z: 26, radius: 7.5 },
   { id: 'shop_dhanmondi', kind: 'shop', name: 'Dhanmondi Biriyani & Gear', banglaName: 'ধানমন্ডি বিরিয়ানি ও শপ', x: -166, z: 24, radius: 6.5 },
   { id: 'tea_sadarghat', kind: 'tea_stall', name: 'Buriganga Ghat Cha', banglaName: 'বুড়িগঙ্গা ঘাট চা স্টল', x: 24, z: 176, radius: 5.5 },
+
+  // Authentic Dhaka Safehouses
+  { id: 'safehouse_old_dhaka', kind: 'safehouse', name: "Tariq's Old Dhaka Rooftop Apartment", banglaName: 'তারেকের পুরান ঢাকা ফ্ল্যাট', x: -28, z: 48, radius: 6.5, safehouseId: 'old_dhaka_rooftop' },
+  { id: 'safehouse_gulshan', kind: 'safehouse', name: 'Gulshan Luxury Penthouse', banglaName: 'গুলশান লাক্সারি পেন্টহাউস', x: 42, z: -52, radius: 7.0, safehouseId: 'gulshan_penthouse' },
+  { id: 'safehouse_dhanmondi', kind: 'safehouse', name: 'Dhanmondi Lakefront Safehouse', banglaName: 'ধানমন্ডি লেক সেফহাউস', x: -172, z: 36, radius: 6.5, safehouseId: 'dhanmondi_hideout' },
+
+  // Authentic Dhaka Fuel & CNG Filling Stations
+  { id: 'fuel_kawran', kind: 'fuel_station', name: 'Padma Oil Fuel & CNG Station', banglaName: 'পদ্মা অয়েল ফিলিং স্টেশন', x: -48, z: 12, radius: 7.0 },
+  { id: 'fuel_motijheel', kind: 'fuel_station', name: 'Meghna Petroleum Fuel Hub', banglaName: 'মেঘনা পেট্রোলিয়াম হাব', x: 120, z: -14, radius: 7.0 },
+  { id: 'fuel_mirpur', kind: 'fuel_station', name: 'Dhaka Green CNG Filling Station', banglaName: 'ঢাকা সিএনজি স্টেশন', x: -135, z: -65, radius: 7.0 },
+
+  // Interactive Conversation NPCs
+  { id: 'npc_rafiq_poi', kind: 'dialogue_npc', name: 'Talk to Rafiq Bhai', banglaName: 'রফিক ভাইয়ের সাথে কথা বলো', x: -16, z: 42, radius: 4.8 },
+  { id: 'npc_babu_poi', kind: 'dialogue_npc', name: 'Talk to Babu', banglaName: 'বাবুর সাথে কথা বলো', x: -24, z: 24, radius: 4.8 },
+  { id: 'npc_nadia_poi', kind: 'dialogue_npc', name: 'Talk to Nadia Rahman', banglaName: 'নাদিয়ার সাথে কথা বলো', x: 42, z: -52, radius: 4.8 },
 ];
 
 // Preserved & expanded hero core buildings (inside central blocks + signature district landmarks)
@@ -196,18 +382,12 @@ const HERO_BUILDINGS: BuildingSpec[] = [
     hasWaterTank: true, isHero: true,
   },
   {
-    id: 'b_res_se1',
-    x: 24, z: 44, w: 14, d: 12, h: 15,
-    district: 'old_dhaka', style: 'residential',
-    color: 0xd6c7b2, accentColor: 0x9b3a2e,
-    hasWaterTank: true, isHero: true,
-  },
-  {
-    id: 'b_res_se2',
-    x: 45, z: 44, w: 14, d: 13, h: 18,
-    district: 'old_dhaka', style: 'residential',
-    color: 0xc2b29b, accentColor: 0x1b5e4a,
-    hasWaterTank: true, isHero: true,
+    id: 'b_baitul_mukarram',
+    x: 34, z: 44, w: 20, d: 16, h: 22,
+    district: 'shapla_crossing', style: 'national_mosque',
+    color: 0xf1f5f9, accentColor: 0x10b981,
+    signText: 'BAITUL MUKARRAM', signBangla: 'বায়তুল মোকাররম',
+    isHero: true,
   },
 
   // === NORTHEAST INNER BLOCK: Gulshan Commercial + Dhaka Customs Garage ===
@@ -349,6 +529,56 @@ const HERO_BUILDINGS: BuildingSpec[] = [
     color: 0xb59c84, accentColor: 0xd97706,
     signText: 'MIRPUR BAZAAR', signBangla: 'মিরপুর বাজার',
     hasAwning: true, hasWaterTank: true, isHero: true,
+  },
+
+  // Ahsan Manzil Pink Palace (Old Dhaka / Buriganga Riverfront)
+  {
+    id: 'b_ahsan_manzil',
+    x: -84, z: 166, w: 20, d: 16, h: 18,
+    district: 'sadarghat', style: 'pink_palace',
+    color: 0xd8707e, accentColor: 0xf5ebe6,
+    signText: 'AHSAN MANZIL', signBangla: 'আহসান মঞ্জিল',
+    isHero: true,
+  },
+
+  // Lalbagh Fort (Old Dhaka Mughal Terracotta Fort)
+  {
+    id: 'b_lalbagh_fort',
+    x: -188, z: 124, w: 22, d: 16, h: 14,
+    district: 'old_dhaka', style: 'mughal_fort',
+    color: 0xb4533c, accentColor: 0xd97706,
+    signText: 'LALBAGH FORT', signBangla: 'লালবাগ কেল্লা',
+    isHero: true,
+  },
+
+  // Tara Masjid (Star Mosque) Heritage Mosque in Armanitola
+  {
+    id: 'b_tara_masjid',
+    x: -122, z: 164, w: 16, d: 14, h: 13,
+    district: 'old_dhaka', style: 'old_dhaka',
+    color: 0xe2e8f0, accentColor: 0x0284c7,
+    signText: 'TARA MASJID', signBangla: 'তারা মসজিদ',
+    isHero: true,
+  },
+
+  // Banani Road 11 Boutique Plaza (Gulshan-Banani Commercial Corridor)
+  {
+    id: 'b_banani_11_boutique',
+    x: 45, z: -124, w: 18, d: 14, h: 30,
+    district: 'uttara_north', style: 'gulshan_tower',
+    color: 0x1e293b, accentColor: 0x38bdf8,
+    signText: 'BANANI 11 PLAZA', signBangla: 'বনানী ১১ ফ্যাশন প্লাজা',
+    hasAwning: true, hasWaterTank: true, isHero: true,
+  },
+
+  // Dhaka Metro Rail (MRT-6) Station & Viaduct Terminal (North / Uttara)
+  {
+    id: 'b_uttara_metro',
+    x: 24, z: -242, w: 22, d: 12, h: 16,
+    district: 'uttara_north', style: 'metro_station',
+    color: 0x334155, accentColor: 0x06b6d4,
+    signText: 'DHAKA METRO MRT-6', signBangla: 'মেট্রোরেল উত্তরা',
+    hasAwning: true, isHero: true,
   },
 ];
 
@@ -751,6 +981,13 @@ export const INITIAL_VEHICLES: InitialVehicleSpawn[] = [
   { id: 'v_dhanmondi_cng', kind: 'cng', x: -156, z: 22, heading: 0, color: 0x0f6a44, driver: 'none' },
   { id: 'v_banani_bike', kind: 'bike', x: 18, z: -148, heading: Math.PI * 0.5, color: 0x0284c7, driver: 'none' },
   { id: 'v_sadarghat_rickshaw', kind: 'rickshaw', x: 16, z: 182, heading: -Math.PI * 0.5, color: 0xd97706, driver: 'none' },
+
+  // Moored Drivable Watercraft at Sadarghat Ghats & Keraniganj Piers
+  { id: 'w_launch_sadarghat', kind: 'launch', x: -26, z: 209, heading: 0, color: 0x0f5132, driver: 'none' },
+  { id: 'w_speedboat_sadarghat', kind: 'speedboat', x: 26, z: 207, heading: 0, color: 0xd97706, driver: 'none' },
+  { id: 'w_jetski_sadarghat', kind: 'jetski', x: 78, z: 206, heading: 0, color: 0x2563eb, driver: 'none' },
+  { id: 'w_speedboat_keraniganj', kind: 'speedboat', x: -26, z: 382, heading: Math.PI, color: 0xdc2626, driver: 'none' },
+  { id: 'w_jetski_keraniganj', kind: 'jetski', x: 65, z: 380, heading: Math.PI, color: 0x16a34a, driver: 'none' },
 
   // Live moving traffic across inner & expanded Dhaka avenues (20 active traffic vehicles)
   { id: 't_cng_1', kind: 'cng', x: 61, z: 30, heading: Math.PI, color: 0x0e7448, driver: 'traffic', routeIdx: 0, waypointIdx: 1 },

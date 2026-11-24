@@ -52,6 +52,10 @@ const INITIAL_HUD: HudSnapshot = {
   vehicleSpeedKmh: 0,
   vehicleHp: 0,
   vehicleMaxHp: 100,
+  fuel: 100,
+  maxFuel: 100,
+  fuelRatio: 1.0,
+  isLowFuel: false,
   weapon: 'fists',
   unlockedWeapons: ['fists', 'pistol'],
   magAmmo: 0,
@@ -59,6 +63,8 @@ const INITIAL_HUD: HudSnapshot = {
   reloading: false,
   outfit: 'street',
   unlockedOutfits: ['street'],
+  unlockedSafehouses: ['old_dhaka_rooftop'],
+  inventory: [],
   interactPrompt: null,
   interactKey: null,
   missionTitle: null,
@@ -68,9 +74,18 @@ const INITIAL_HUD: HudSnapshot = {
   fareActive: false,
   fareText: null,
   fareTimer: 0,
+  activeSideMission: null,
+  activeConversation: null,
+  safehouseName: null,
+  hasSaveGame: false,
   dialogue: null,
   toast: null,
   muted: false,
+  multiplayerActive: false,
+  multiplayerPing: 0,
+  multiplayerPlayerCount: 1,
+  multiplayerKillfeed: [],
+  multiplayerChat: [],
   playerX: -2.2,
   playerZ: 35.2,
   playerHeading: Math.PI,
@@ -80,6 +95,8 @@ const INITIAL_HUD: HudSnapshot = {
     missionsCompleted: 0,
     totalMissions: STORY_MISSIONS.length,
     faresCompleted: 0,
+    bountiesCompleted: 0,
+    carTheftsCompleted: 0,
     playTimeSec: 0,
     cause: '',
   },
@@ -104,6 +121,7 @@ export default function App() {
   }, []);
 
   const handleStart = useCallback(() => engineRef.current?.startGame(), []);
+  const handleContinue = useCallback(() => engineRef.current?.continueGame(), []);
   const handleRestart = useCallback(() => engineRef.current?.restartGame(), []);
   const handlePause = useCallback(() => engineRef.current?.togglePause(), []);
   const handleTitle = useCallback(() => engineRef.current?.returnToTitle(), []);
@@ -133,6 +151,20 @@ export default function App() {
     [],
   );
   const handleOutfit = useCallback((id: OutfitId) => engineRef.current?.handleOutfitSelect(id), []);
+  const handleSaveGame = useCallback(() => engineRef.current?.saveGame(), []);
+  const handleLoadGame = useCallback(() => engineRef.current?.loadGame(), []);
+  const handleSafehouse = useCallback((action: any, safehouseId?: any) => engineRef.current?.handleSafehouseAction(action, safehouseId), []);
+  const handleRefuel = useCallback((action: any) => engineRef.current?.handleRefuelAction(action), []);
+  const handleUpgrade = useCallback((opt: any, val?: any) => engineRef.current?.handleVehicleUpgrade(opt, val), []);
+  const handleUseItem = useCallback((itemId: string) => engineRef.current?.handleUseItem(itemId), []);
+  const handleDialogueOption = useCallback((optionId: string) => engineRef.current?.handleDialogueOption(optionId), []);
+  const handleConnectMultiplayer = useCallback(
+    (serverUrl: string, callsign: string) => engineRef.current?.connectMultiplayer(serverUrl, callsign),
+    [],
+  );
+  const handleDisconnectMultiplayer = useCallback(() => engineRef.current?.disconnectMultiplayer(), []);
+  const handleSendChat = useCallback((text: string) => engineRef.current?.sendChatMessage(text), []);
+  const handleOpenMultiplayerLobby = useCallback(() => engineRef.current?.openMultiplayerLobby(), []);
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-[#0b0e13]">
@@ -140,7 +172,14 @@ export default function App() {
       <div ref={mountRef} data-testid="dhaka-canvas-root" className="fixed inset-0 w-full h-full" />
 
       {hud.phase === 'title' && (
-        <TitleScreen onStart={handleStart} muted={hud.muted} onToggleMute={handleMute} />
+        <TitleScreen
+          onStart={handleStart}
+          muted={hud.muted}
+          onToggleMute={handleMute}
+          hasSaveGame={hud.hasSaveGame}
+          onContinue={handleContinue}
+          onStartMultiplayer={handleOpenMultiplayerLobby}
+        />
       )}
 
       {hud.phase !== 'title' && (
@@ -151,6 +190,9 @@ export default function App() {
           onOpenWardrobe={handleWardrobe}
           onSelectWeapon={handleSelectWeapon}
           onToggleFare={handleToggleFare}
+          onUseItem={handleUseItem}
+          onOpenMultiplayerLobby={handleOpenMultiplayerLobby}
+          onSendChatMessage={handleSendChat}
         />
       )}
 
@@ -169,6 +211,15 @@ export default function App() {
         onShopBuy={handleShopBuy}
         onGarageService={handleGarage}
         onOutfitSelect={handleOutfit}
+        onSaveGame={handleSaveGame}
+        onLoadGame={handleLoadGame}
+        onSafehouseAction={handleSafehouse}
+        onRefuelAction={handleRefuel}
+        onVehicleUpgrade={handleUpgrade}
+        onUseItem={handleUseItem}
+        onDialogueOption={handleDialogueOption}
+        onConnectMultiplayer={handleConnectMultiplayer}
+        onDisconnectMultiplayer={handleDisconnectMultiplayer}
       />
     </div>
   );

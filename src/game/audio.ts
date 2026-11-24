@@ -117,10 +117,16 @@ export class DhakaAudioEngine {
             ? 68
             : vehicleKind === 'bike'
               ? 88
-              : vehicleKind === 'bus' || vehicleKind === 'truck'
-                ? 44
-                : 58;
-        this.engineOsc.type = vehicleKind === 'cng' ? 'square' : 'sawtooth';
+              : vehicleKind === 'launch'
+                ? 36
+                : vehicleKind === 'speedboat'
+                  ? 110
+                  : vehicleKind === 'jetski'
+                    ? 145
+                    : vehicleKind === 'bus' || vehicleKind === 'truck'
+                      ? 44
+                      : 58;
+        this.engineOsc.type = vehicleKind === 'cng' || vehicleKind === 'jetski' ? 'square' : 'sawtooth';
         this.engineOsc.frequency.setTargetAtTime(baseFreq + speedRatio * baseFreq * 1.9, t, 0.06);
         this.engineGain.gain.setTargetAtTime(0.05 + speedRatio * 0.06, t, 0.08);
       } else {
@@ -218,7 +224,33 @@ export class DhakaAudioEngine {
       return;
     }
 
-    const freqs = kind === 'bus' || kind === 'truck' ? [185, 233] : kind === 'cng' ? [440, 554] : [360, 450];
+    if (kind === 'launch') {
+      // Majestic low-frequency dual marine horn
+      [92, 116].forEach((f) => {
+        const osc = this.ctx!.createOscillator();
+        const gain = this.ctx!.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(f, t);
+        gain.gain.setValueAtTime(0.18, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 1.2);
+        osc.connect(gain);
+        gain.connect(this.masterGain!);
+        osc.start(t);
+        osc.stop(t + 1.25);
+      });
+      return;
+    }
+
+    const freqs =
+      kind === 'bus' || kind === 'truck'
+        ? [185, 233]
+        : kind === 'cng'
+          ? [440, 554]
+          : kind === 'speedboat'
+            ? [480, 620]
+            : kind === 'jetski'
+              ? [640, 780]
+              : [360, 450];
     freqs.forEach((f) => {
       const osc = this.ctx!.createOscillator();
       const gain = this.ctx!.createGain();
@@ -231,6 +263,22 @@ export class DhakaAudioEngine {
       osc.start(t);
       osc.stop(t + 0.34);
     });
+  }
+
+  public playWaterSplash(intensity = 1.0): void {
+    if (!this.ctx || !this.masterGain || this.muted) return;
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(120, t);
+    osc.frequency.exponentialRampToValueAtTime(45, t + 0.28);
+    gain.gain.setValueAtTime(Math.min(0.25, 0.08 * intensity), t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.32);
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(t);
+    osc.stop(t + 0.35);
   }
 
   public playImpact(heavy = false): void {
@@ -308,6 +356,12 @@ export class DhakaAudioEngine {
 
   public dispose(): void {
     this.silenceLoops();
+    try {
+      this.engineOsc?.stop();
+      this.sirenOsc?.stop();
+    } catch {
+      // Ignore if already stopped
+    }
     if (this.ctx) {
       this.ctx.close().catch(() => {});
       this.ctx = null;

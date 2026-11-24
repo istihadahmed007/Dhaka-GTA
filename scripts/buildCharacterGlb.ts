@@ -544,7 +544,96 @@ function buildAnimationClips(): THREE.AnimationClip[] {
     ]),
   ]);
 
-  // 3. RUN (0.64s loop — athletic Dhaka sprint with forward lean & high knee drive)
+  // 3. JOG (0.76s loop — intermediate cadence between walk & sprint, athletic bounce)
+  const jogT = [0, 0.19, 0.38, 0.57, 0.76];
+  const jogClip = new THREE.AnimationClip('Jog', 0.76, [
+    posTrack('Hips', jogT, [
+      [0, 0.86, 0],
+      [0.02, 0.93, 0],
+      [0, 0.86, 0],
+      [-0.02, 0.93, 0],
+      [0, 0.86, 0],
+    ]),
+    quatTrack('Hips', jogT, [
+      [0.08, 0.1, 0.02],
+      [0.06, 0, -0.02],
+      [0.08, -0.1, -0.02],
+      [0.06, 0, 0.02],
+      [0.08, 0.1, 0.02],
+    ]),
+    quatTrack('Spine', jogT, [
+      [0.08, -0.08, 0],
+      [0.06, 0, 0],
+      [0.08, 0.08, 0],
+      [0.06, 0, 0],
+      [0.08, -0.08, 0],
+    ]),
+    quatTrack('Chest', jogT, [
+      [0.05, -0.11, 0],
+      [0.04, 0, 0],
+      [0.05, 0.11, 0],
+      [0.04, 0, 0],
+      [0.05, -0.11, 0],
+    ]),
+    quatTrack('LeftThigh', jogT, [
+      [-0.65, 0, 0],
+      [-0.04, 0, 0],
+      [0.52, 0, 0],
+      [-0.24, 0, 0],
+      [-0.65, 0, 0],
+    ]),
+    quatTrack('LeftShin', jogT, [
+      [0.18, 0, 0],
+      [0.2, 0, 0],
+      [0.36, 0, 0],
+      [0.92, 0, 0],
+      [0.18, 0, 0],
+    ]),
+    quatTrack('RightThigh', jogT, [
+      [0.52, 0, 0],
+      [-0.24, 0, 0],
+      [-0.65, 0, 0],
+      [-0.04, 0, 0],
+      [0.52, 0, 0],
+    ]),
+    quatTrack('RightShin', jogT, [
+      [0.36, 0, 0],
+      [0.92, 0, 0],
+      [0.18, 0, 0],
+      [0.2, 0, 0],
+      [0.36, 0, 0],
+    ]),
+    quatTrack('LeftUpperArm', jogT, [
+      [0.52, 0, -0.1],
+      [0.03, 0, -0.1],
+      [-0.58, 0, -0.1],
+      [-0.04, 0, -0.1],
+      [0.52, 0, -0.1],
+    ]),
+    quatTrack('LeftForearm', jogT, [
+      [-0.65, 0, 0],
+      [-0.78, 0, 0],
+      [-0.85, 0, 0],
+      [-0.72, 0, 0],
+      [-0.65, 0, 0],
+    ]),
+    quatTrack('RightUpperArm', jogT, [
+      [-0.58, 0, 0.1],
+      [-0.04, 0, 0.1],
+      [0.52, 0, 0.1],
+      [0.03, 0, 0.1],
+      [-0.58, 0, 0.1],
+    ]),
+    quatTrack('RightForearm', jogT, [
+      [-0.85, 0, 0],
+      [-0.72, 0, 0],
+      [-0.65, 0, 0],
+      [-0.78, 0, 0],
+      [-0.85, 0, 0],
+    ]),
+  ]);
+
+  // 4. RUN / SPRINT (0.64s loop — athletic Dhaka sprint with forward lean & high knee drive)
   const runT = [0, 0.16, 0.32, 0.48, 0.64];
   const runClip = new THREE.AnimationClip('Run', 0.64, [
     posTrack('Hips', runT, [
@@ -640,7 +729,634 @@ function buildAnimationClips(): THREE.AnimationClip[] {
     ]),
   ]);
 
-  // 4. ATTACK (0.42s one-shot — snappy forward punch / weapon strike + torso snap)
+  // 5. TURN LEFT (0.64s in-place step turn)
+  const turnT = [0, 0.16, 0.32, 0.48, 0.64];
+  const turnLeftClip = new THREE.AnimationClip('TurnLeft', 0.64, [
+    posTrack('Hips', turnT, [
+      [0, 0.9, 0],
+      [-0.015, 0.91, 0],
+      [0, 0.895, 0],
+      [0.012, 0.908, 0],
+      [0, 0.9, 0],
+    ]),
+    quatTrack('Hips', turnT, [
+      [0, 0, 0],
+      [0.02, 0.28, 0.02],
+      [0.01, 0.54, 0],
+      [0.02, 0.68, -0.02],
+      [0, 0.785, 0],
+    ]),
+    quatTrack('Spine', turnT, [
+      [0, 0, 0],
+      [0.02, 0.14, 0],
+      [0.01, 0.24, 0],
+      [0.02, 0.12, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack('LeftThigh', turnT, [
+      [0, 0, 0],
+      [-0.28, 0.35, -0.15],
+      [-0.1, 0.2, 0],
+      [0.05, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack('LeftShin', turnT, [
+      [0, 0, 0],
+      [0.45, 0, 0],
+      [0.15, 0, 0],
+      [0, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack('RightThigh', turnT, [
+      [0, 0, 0],
+      [0.05, 0, 0],
+      [-0.26, 0.25, 0.12],
+      [-0.08, 0.1, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack('RightShin', turnT, [
+      [0, 0, 0],
+      [0, 0, 0],
+      [0.42, 0, 0],
+      [0.12, 0, 0],
+      [0, 0, 0],
+    ]),
+  ]);
+
+  // 6. TURN RIGHT (0.64s in-place step turn)
+  const turnRightClip = new THREE.AnimationClip('TurnRight', 0.64, [
+    posTrack('Hips', turnT, [
+      [0, 0.9, 0],
+      [0.015, 0.91, 0],
+      [0, 0.895, 0],
+      [-0.012, 0.908, 0],
+      [0, 0.9, 0],
+    ]),
+    quatTrack('Hips', turnT, [
+      [0, 0, 0],
+      [0.02, -0.28, -0.02],
+      [0.01, -0.54, 0],
+      [0.02, -0.68, 0.02],
+      [0, -0.785, 0],
+    ]),
+    quatTrack('Spine', turnT, [
+      [0, 0, 0],
+      [0.02, -0.14, 0],
+      [0.01, -0.24, 0],
+      [0.02, -0.12, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack('RightThigh', turnT, [
+      [0, 0, 0],
+      [-0.28, -0.35, 0.15],
+      [-0.1, -0.2, 0],
+      [0.05, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack('RightShin', turnT, [
+      [0, 0, 0],
+      [0.45, 0, 0],
+      [0.15, 0, 0],
+      [0, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack('LeftThigh', turnT, [
+      [0, 0, 0],
+      [0.05, 0, 0],
+      [-0.26, -0.25, -0.12],
+      [-0.08, -0.1, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack('LeftShin', turnT, [
+      [0, 0, 0],
+      [0, 0, 0],
+      [0.42, 0, 0],
+      [0.12, 0, 0],
+      [0, 0, 0],
+    ]),
+  ]);
+
+  // 7. START (0.48s inertial acceleration push-off)
+  const startT = [0, 0.16, 0.32, 0.48];
+  const startClip = new THREE.AnimationClip('Start', 0.48, [
+    posTrack('Hips', startT, [
+      [0, 0.9, 0],
+      [0, 0.85, 0.06],
+      [0, 0.88, 0.16],
+      [0, 0.89, 0.24],
+    ]),
+    quatTrack('Hips', startT, [
+      [0, 0, 0],
+      [0.15, 0, 0],
+      [0.12, 0, 0],
+      [0.06, 0, 0],
+    ]),
+    quatTrack('Spine', startT, [
+      [0, 0, 0],
+      [0.18, 0, 0],
+      [0.12, 0, 0],
+      [0.05, 0, 0],
+    ]),
+    quatTrack('LeftThigh', startT, [
+      [0, 0, 0],
+      [-0.52, 0, 0],
+      [-0.32, 0, 0],
+      [0.18, 0, 0],
+    ]),
+    quatTrack('LeftShin', startT, [
+      [0, 0, 0],
+      [0.68, 0, 0],
+      [0.22, 0, 0],
+      [0.12, 0, 0],
+    ]),
+    quatTrack('RightThigh', startT, [
+      [0, 0, 0],
+      [0.38, 0, 0],
+      [0.46, 0, 0],
+      [-0.42, 0, 0],
+    ]),
+    quatTrack('RightShin', startT, [
+      [0, 0, 0],
+      [0.15, 0, 0],
+      [0.12, 0, 0],
+      [0.48, 0, 0],
+    ]),
+    quatTrack('LeftUpperArm', startT, [
+      [0.04, 0, -0.09],
+      [0.45, 0, -0.1],
+      [0.25, 0, -0.1],
+      [-0.25, 0, -0.1],
+    ]),
+    quatTrack('RightUpperArm', startT, [
+      [0.04, 0, 0.09],
+      [-0.45, 0, 0.1],
+      [-0.25, 0, 0.1],
+      [0.35, 0, 0.1],
+    ]),
+  ]);
+
+  // 8. STOP (0.44s inertial deceleration foot-plant & settling)
+  const stopT = [0, 0.14, 0.28, 0.44];
+  const stopClip = new THREE.AnimationClip('Stop', 0.44, [
+    posTrack('Hips', stopT, [
+      [0, 0.88, 0],
+      [0, 0.84, 0.04],
+      [0, 0.885, 0.01],
+      [0, 0.9, 0],
+    ]),
+    quatTrack('Hips', stopT, [
+      [0.08, 0, 0],
+      [-0.06, 0, 0],
+      [-0.02, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack('Spine', stopT, [
+      [0.08, 0, 0],
+      [-0.1, 0, 0],
+      [-0.03, 0, 0],
+      [0.02, 0, 0],
+    ]),
+    quatTrack('LeftThigh', stopT, [
+      [-0.45, 0, 0],
+      [-0.22, 0, 0],
+      [-0.05, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack('LeftShin', stopT, [
+      [0.32, 0, 0],
+      [0.48, 0, 0],
+      [0.18, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack('RightThigh', stopT, [
+      [0.35, 0, 0],
+      [0.18, 0, 0],
+      [0.04, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack('RightShin', stopT, [
+      [0.15, 0, 0],
+      [0.32, 0, 0],
+      [0.14, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack('LeftUpperArm', stopT, [
+      [0.35, 0, -0.09],
+      [-0.15, 0, -0.1],
+      [0.0, 0, -0.09],
+      [0.04, 0, -0.09],
+    ]),
+    quatTrack('RightUpperArm', stopT, [
+      [-0.35, 0, 0.09],
+      [0.15, 0, 0.1],
+      [0.0, 0, 0.09],
+      [0.04, 0, 0.09],
+    ]),
+  ]);
+
+  // 9. JUMP (0.48s anticipation crouch & launch extension)
+  const jumpT = [0, 0.12, 0.26, 0.48];
+  const jumpClip = new THREE.AnimationClip('Jump', 0.48, [
+    posTrack('Hips', jumpT, [
+      [0, 0.9, 0],
+      [0, 0.76, 0],
+      [0, 0.98, 0],
+      [0, 0.94, 0],
+    ]),
+    quatTrack('Hips', jumpT, [
+      [0, 0, 0],
+      [0.18, 0, 0],
+      [-0.08, 0, 0],
+      [0.04, 0, 0],
+    ]),
+    quatTrack('Spine', jumpT, [
+      [0, 0, 0],
+      [0.22, 0, 0],
+      [-0.12, 0, 0],
+      [0.02, 0, 0],
+    ]),
+    quatTrack('LeftThigh', jumpT, [
+      [0, 0, 0],
+      [-0.65, 0, 0],
+      [0.12, 0, 0],
+      [-0.42, 0, 0],
+    ]),
+    quatTrack('LeftShin', jumpT, [
+      [0, 0, 0],
+      [1.05, 0, 0],
+      [0.08, 0, 0],
+      [0.72, 0, 0],
+    ]),
+    quatTrack('RightThigh', jumpT, [
+      [0, 0, 0],
+      [-0.65, 0, 0],
+      [0.12, 0, 0],
+      [-0.42, 0, 0],
+    ]),
+    quatTrack('RightShin', jumpT, [
+      [0, 0, 0],
+      [1.05, 0, 0],
+      [0.08, 0, 0],
+      [0.72, 0, 0],
+    ]),
+    quatTrack('LeftUpperArm', jumpT, [
+      [0.04, 0, -0.09],
+      [-0.45, 0, -0.15],
+      [0.85, 0, -0.2],
+      [0.45, 0, -0.2],
+    ]),
+    quatTrack('RightUpperArm', jumpT, [
+      [0.04, 0, 0.09],
+      [-0.45, 0, 0.15],
+      [0.85, 0, 0.2],
+      [0.45, 0, 0.2],
+    ]),
+  ]);
+
+  // 10. FALL (0.52s airborne descent drift)
+  const fallT = [0, 0.26, 0.52];
+  const fallClip = new THREE.AnimationClip('Fall', 0.52, [
+    posTrack('Hips', fallT, [
+      [0, 0.92, 0],
+      [0, 0.9, 0],
+      [0, 0.91, 0],
+    ]),
+    quatTrack('Hips', fallT, [
+      [0.06, 0, 0],
+      [0.08, 0, 0],
+      [0.06, 0, 0],
+    ]),
+    quatTrack('Spine', fallT, [
+      [-0.04, 0, 0],
+      [-0.06, 0, 0],
+      [-0.04, 0, 0],
+    ]),
+    quatTrack('LeftThigh', fallT, [
+      [-0.22, 0, -0.08],
+      [-0.25, 0, -0.09],
+      [-0.22, 0, -0.08],
+    ]),
+    quatTrack('LeftShin', fallT, [
+      [0.35, 0, 0],
+      [0.42, 0, 0],
+      [0.35, 0, 0],
+    ]),
+    quatTrack('RightThigh', fallT, [
+      [-0.22, 0, 0.08],
+      [-0.25, 0, 0.09],
+      [-0.22, 0, 0.08],
+    ]),
+    quatTrack('RightShin', fallT, [
+      [0.35, 0, 0],
+      [0.42, 0, 0],
+      [0.35, 0, 0],
+    ]),
+    quatTrack('LeftUpperArm', fallT, [
+      [0.35, 0, -0.45],
+      [0.42, 0, -0.52],
+      [0.35, 0, -0.45],
+    ]),
+    quatTrack('RightUpperArm', fallT, [
+      [0.35, 0, 0.45],
+      [0.42, 0, 0.52],
+      [0.35, 0, 0.45],
+    ]),
+  ]);
+
+  // 11. LAND (0.44s impact compression & rebound to standing)
+  const landT = [0, 0.12, 0.28, 0.44];
+  const landClip = new THREE.AnimationClip('Land', 0.44, [
+    posTrack('Hips', landT, [
+      [0, 0.9, 0],
+      [0, 0.72, 0],
+      [0, 0.86, 0],
+      [0, 0.9, 0],
+    ]),
+    quatTrack('Hips', landT, [
+      [0, 0, 0],
+      [0.16, 0, 0],
+      [0.06, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack('Spine', landT, [
+      [0, 0, 0],
+      [0.26, 0, 0],
+      [0.08, 0, 0],
+      [0.02, 0, 0],
+    ]),
+    quatTrack('LeftThigh', landT, [
+      [0, 0, 0],
+      [-0.62, 0, 0],
+      [-0.22, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack('LeftShin', landT, [
+      [0, 0, 0],
+      [0.98, 0, 0],
+      [0.32, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack('RightThigh', landT, [
+      [0, 0, 0],
+      [-0.62, 0, 0],
+      [-0.22, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack('RightShin', landT, [
+      [0, 0, 0],
+      [0.98, 0, 0],
+      [0.32, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack('LeftUpperArm', landT, [
+      [0.3, 0, -0.3],
+      [-0.32, 0, -0.15],
+      [0.0, 0, -0.1],
+      [0.04, 0, -0.09],
+    ]),
+    quatTrack('RightUpperArm', landT, [
+      [0.3, 0, 0.3],
+      [-0.32, 0, 0.15],
+      [0.0, 0, 0.1],
+      [0.04, 0, 0.09],
+    ]),
+  ]);
+
+  // 12. AIM (1.0s loop — upper body firearm aiming pose)
+  const aimT = [0, 0.5, 1.0];
+  const aimClip = new THREE.AnimationClip('Aim', 1.0, [
+    quatTrack('Spine', aimT, [
+      [0.02, 0.18, 0],
+      [0.015, 0.19, 0],
+      [0.02, 0.18, 0],
+    ]),
+    quatTrack('Chest', aimT, [
+      [0.03, 0.22, 0],
+      [0.025, 0.23, 0],
+      [0.03, 0.22, 0],
+    ]),
+    quatTrack('Head', aimT, [
+      [0, -0.15, 0],
+      [0.01, -0.16, 0],
+      [0, -0.15, 0],
+    ]),
+    quatTrack('RightUpperArm', aimT, [
+      [-1.12, -0.12, 0.15],
+      [-1.11, -0.12, 0.15],
+      [-1.12, -0.12, 0.15],
+    ]),
+    quatTrack('RightForearm', aimT, [
+      [-0.22, 0, 0],
+      [-0.21, 0, 0],
+      [-0.22, 0, 0],
+    ]),
+    quatTrack('LeftUpperArm', aimT, [
+      [-0.82, 0.35, -0.28],
+      [-0.81, 0.35, -0.28],
+      [-0.82, 0.35, -0.28],
+    ]),
+    quatTrack('LeftForearm', aimT, [
+      [-0.92, 0, 0],
+      [-0.91, 0, 0],
+      [-0.92, 0, 0],
+    ]),
+  ]);
+
+  // 13. SHOOT (0.24s one-shot firearm recoil snap)
+  const shootT = [0, 0.04, 0.12, 0.24];
+  const shootClip = new THREE.AnimationClip('Shoot', 0.24, [
+    quatTrack('Spine', shootT, [
+      [0.02, 0.18, 0],
+      [-0.1, 0.16, 0],
+      [-0.02, 0.17, 0],
+      [0.02, 0.18, 0],
+    ]),
+    quatTrack('Chest', shootT, [
+      [0.03, 0.22, 0],
+      [-0.12, 0.2, 0],
+      [-0.03, 0.21, 0],
+      [0.03, 0.22, 0],
+    ]),
+    quatTrack('RightUpperArm', shootT, [
+      [-1.12, -0.12, 0.15],
+      [-1.38, -0.14, 0.18],
+      [-1.18, -0.13, 0.16],
+      [-1.12, -0.12, 0.15],
+    ]),
+    quatTrack('RightForearm', shootT, [
+      [-0.22, 0, 0],
+      [-0.45, 0, 0],
+      [-0.28, 0, 0],
+      [-0.22, 0, 0],
+    ]),
+  ]);
+
+  // 14. VEHICLE ENTER (0.64s approach, reach handle, lower into seat)
+  const vEnterT = [0, 0.2, 0.44, 0.64];
+  const vehicleEnterClip = new THREE.AnimationClip('VehicleEnter', 0.64, [
+    posTrack('Hips', vEnterT, [
+      [0, 0.9, 0],
+      [0.08, 0.84, 0.05],
+      [0.15, 0.62, 0.02],
+      [0.05, 0.46, 0],
+    ]),
+    quatTrack('Hips', vEnterT, [
+      [0, 0, 0],
+      [0.1, -0.32, 0],
+      [0.15, -0.68, 0.08],
+      [0.05, -0.05, 0],
+    ]),
+    quatTrack('Spine', vEnterT, [
+      [0, 0, 0],
+      [0.15, 0.25, 0],
+      [0.22, 0.42, 0],
+      [0.1, 0, 0],
+    ]),
+    quatTrack('LeftThigh', vEnterT, [
+      [0, 0, 0],
+      [-0.35, 0, 0],
+      [-0.85, 0.2, 0],
+      [-1.38, 0, 0],
+    ]),
+    quatTrack('LeftShin', vEnterT, [
+      [0, 0, 0],
+      [0.45, 0, 0],
+      [1.15, 0, 0],
+      [1.45, 0, 0],
+    ]),
+    quatTrack('RightThigh', vEnterT, [
+      [0, 0, 0],
+      [-0.1, 0, 0],
+      [-0.72, -0.2, 0],
+      [-1.38, 0, 0],
+    ]),
+    quatTrack('RightShin', vEnterT, [
+      [0, 0, 0],
+      [0.15, 0, 0],
+      [0.95, 0, 0],
+      [1.45, 0, 0],
+    ]),
+    quatTrack('RightUpperArm', vEnterT, [
+      [0.04, 0, 0.09],
+      [-0.65, 0.35, 0.25],
+      [-0.78, 0.15, 0.18],
+      [-0.72, -0.15, 0.12],
+    ]),
+  ]);
+
+  // 15. VEHICLE EXIT (0.56s push door open, swing legs out, rise to standing)
+  const vExitT = [0, 0.18, 0.36, 0.56];
+  const vehicleExitClip = new THREE.AnimationClip('VehicleExit', 0.56, [
+    posTrack('Hips', vExitT, [
+      [0.05, 0.46, 0],
+      [0.14, 0.58, 0.05],
+      [0.08, 0.78, 0.08],
+      [0, 0.9, 0],
+    ]),
+    quatTrack('Hips', vExitT, [
+      [0.05, -0.05, 0],
+      [0.12, 0.55, 0],
+      [0.06, 0.22, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack('Spine', vExitT, [
+      [0.1, 0, 0],
+      [0.18, -0.35, 0],
+      [0.08, -0.12, 0],
+      [0.02, 0, 0],
+    ]),
+    quatTrack('LeftThigh', vExitT, [
+      [-1.38, 0, 0],
+      [-0.85, -0.3, 0],
+      [-0.32, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack('LeftShin', vExitT, [
+      [1.45, 0, 0],
+      [0.95, 0, 0],
+      [0.35, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack('RightThigh', vExitT, [
+      [-1.38, 0, 0],
+      [-1.1, 0, 0],
+      [-0.45, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack('RightShin', vExitT, [
+      [1.45, 0, 0],
+      [1.25, 0, 0],
+      [0.48, 0, 0],
+      [0, 0, 0],
+    ]),
+  ]);
+
+  // 16. VEHICLE DRIVE (1.2s seated posture with steering grip & subtle engine vibration)
+  const vDriveT = [0, 0.6, 1.2];
+  const vehicleDriveClip = new THREE.AnimationClip('VehicleDrive', 1.2, [
+    posTrack('Hips', vDriveT, [
+      [0, 0.46, 0],
+      [0, 0.466, 0],
+      [0, 0.46, 0],
+    ]),
+    quatTrack('Hips', vDriveT, [
+      [0.05, 0, 0],
+      [0.04, 0, 0],
+      [0.05, 0, 0],
+    ]),
+    quatTrack('Spine', vDriveT, [
+      [0.08, 0, 0],
+      [0.07, 0, 0],
+      [0.08, 0, 0],
+    ]),
+    quatTrack('Chest', vDriveT, [
+      [0.04, 0, 0],
+      [0.03, 0, 0],
+      [0.04, 0, 0],
+    ]),
+    quatTrack('LeftThigh', vDriveT, [
+      [-1.4, 0, -0.15],
+      [-1.39, 0, -0.15],
+      [-1.4, 0, -0.15],
+    ]),
+    quatTrack('LeftShin', vDriveT, [
+      [1.48, 0, 0],
+      [1.46, 0, 0],
+      [1.48, 0, 0],
+    ]),
+    quatTrack('RightThigh', vDriveT, [
+      [-1.4, 0, 0.15],
+      [-1.39, 0, 0.15],
+      [-1.4, 0, 0.15],
+    ]),
+    quatTrack('RightShin', vDriveT, [
+      [1.48, 0, 0],
+      [1.46, 0, 0],
+      [1.48, 0, 0],
+    ]),
+    quatTrack('LeftUpperArm', vDriveT, [
+      [-0.72, 0.18, -0.18],
+      [-0.7, 0.18, -0.18],
+      [-0.72, 0.18, -0.18],
+    ]),
+    quatTrack('LeftForearm', vDriveT, [
+      [-0.62, 0, 0],
+      [-0.6, 0, 0],
+      [-0.62, 0, 0],
+    ]),
+    quatTrack('RightUpperArm', vDriveT, [
+      [-0.72, -0.18, 0.18],
+      [-0.7, -0.18, 0.18],
+      [-0.72, -0.18, 0.18],
+    ]),
+    quatTrack('RightForearm', vDriveT, [
+      [-0.62, 0, 0],
+      [-0.6, 0, 0],
+      [-0.62, 0, 0],
+    ]),
+  ]);
+
+  // 17. ATTACK (0.42s one-shot — snappy forward punch / weapon strike + torso snap)
   const atkT = [0, 0.08, 0.18, 0.3, 0.42];
   const attackClip = new THREE.AnimationClip('Attack', 0.42, [
     quatTrack('Spine', atkT, [
@@ -687,7 +1403,7 @@ function buildAnimationClips(): THREE.AnimationClip[] {
     ]),
   ]);
 
-  // 5. HIT (0.36s one-shot — crisp impact recoil flinch)
+  // 18. HIT (0.36s one-shot — crisp impact recoil flinch)
   const hitT = [0, 0.09, 0.22, 0.36];
   const hitClip = new THREE.AnimationClip('Hit', 0.36, [
     posTrack('Hips', hitT, [
@@ -722,7 +1438,7 @@ function buildAnimationClips(): THREE.AnimationClip[] {
     ]),
   ]);
 
-  // 6. KO (0.52s clamp — clean backward fall onto Dhaka pavement)
+  // 19. KO (0.52s clamp — clean backward fall onto Dhaka pavement)
   const koT = [0, 0.18, 0.36, 0.52];
   const koClip = new THREE.AnimationClip('KO', 0.52, [
     posTrack('Hips', koT, [
@@ -763,7 +1479,27 @@ function buildAnimationClips(): THREE.AnimationClip[] {
     ]),
   ]);
 
-  return [idleClip, walkClip, runClip, attackClip, hitClip, koClip];
+  return [
+    idleClip,
+    walkClip,
+    jogClip,
+    runClip,
+    turnLeftClip,
+    turnRightClip,
+    startClip,
+    stopClip,
+    jumpClip,
+    fallClip,
+    landClip,
+    aimClip,
+    shootClip,
+    vehicleEnterClip,
+    vehicleExitClip,
+    vehicleDriveClip,
+    attackClip,
+    hitClip,
+    koClip,
+  ];
 }
 
 async function main(): Promise<void> {

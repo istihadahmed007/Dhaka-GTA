@@ -25,7 +25,8 @@ import {
   TRAFFIC_ROUTES,
   WORLD_HALF_SIZE,
 } from './worldData';
-import { VehicleState, VEHICLE_SPECS } from './types';
+import { VehicleState, VEHICLE_SPECS, isWatercraftKind } from './types';
+import { BURIGANGA_MAX_Z } from './waterSystem';
 
 test('expanded city bounds are ~2.5x original dimensions and contain dense generated blocks', () => {
   assert.ok(WORLD_HALF_SIZE >= 250, `Expected expanded WORLD_HALF_SIZE >= 250, got ${WORLD_HALF_SIZE}`);
@@ -76,9 +77,16 @@ test('all POIs, mission targets, fare destinations, vehicle spawns, and traffic 
     assert.equal(res.collided, false, `Fare destination ${f.label} collides with static object`);
   }
   for (const v of INITIAL_VEHICLES) {
-    checkInBounds(`Vehicle ${v.id}`, v.x, v.z);
-    const res = resolveCircleCollisions(v.x, v.z, 0.8, colliders);
-    assert.equal(res.collided, false, `Vehicle spawn ${v.id} collides with static object`);
+    if (isWatercraftKind(v.kind)) {
+      assert.ok(Math.abs(v.x) < WORLD_HALF_SIZE - 4, `Watercraft ${v.id} X=${v.x} out of bounds`);
+      assert.ok(v.z >= RIVER_Z_START && v.z <= BURIGANGA_MAX_Z, `Watercraft ${v.id} Z=${v.z} out of river bounds`);
+      const res = resolveCircleCollisions(v.x, v.z, 0.8, colliders, true);
+      assert.equal(res.collided, false, `Watercraft spawn ${v.id} collides with static object`);
+    } else {
+      checkInBounds(`Vehicle ${v.id}`, v.x, v.z);
+      const res = resolveCircleCollisions(v.x, v.z, 0.8, colliders);
+      assert.equal(res.collided, false, `Vehicle spawn ${v.id} collides with static object`);
+    }
   }
   TRAFFIC_ROUTES.forEach((route, ri) => {
     route.forEach((wp, wi) => {
@@ -217,4 +225,135 @@ test('all 9 Dhaka districts are detected accurately and time formatting works', 
   assert.equal(getDistrictAt(-120, -190), 'mirpur_market');
   assert.equal(formatDhakaTime(16.5), '4:30 PM');
   assert.equal(formatDhakaTime(0.25), '12:15 AM');
+});
+
+test('luxury sedan accelerates, reverses, simulates wheel spin, and drifts with handbrake', () => {
+  const colliders = buildStaticColliders();
+  const sedan: VehicleState = {
+    id: 'test_sedan',
+    kind: 'sedan',
+    x: 0,
+    y: 0,
+    z: 50,
+    heading: 0, // Facing South (+Z)
+    speed: 0,
+    steerAngle: 0,
+    hp: VEHICLE_SPECS.sedan.maxHp,
+    maxHp: VEHICLE_SPECS.sedan.maxHp,
+    color: VEHICLE_SPECS.sedan.defaultColor,
+    driver: 'player',
+    routeIdx: 0,
+    waypointIdx: 0,
+    honkTimer: 0,
+    sirenOn: false,
+    damagedSmoke: false,
+  };
+
+  // Acceleration test
+  for (let i = 0; i < 25; i++) {
+    stepVehicleKinematics(sedan, { throttle: 1, steer: 0, handbrake: false }, 0.04, colliders);
+  }
+  assert.ok(sedan.speed > 12, `Sedan speed should exceed 12 m/s, got ${sedan.speed}`);
+  assert.ok(sedan.wheelRotation !== undefined && sedan.wheelRotation > 5, 'Wheel rotation should accumulate');
+  assert.ok(sedan.pitch !== undefined, 'Suspension pitch should be calculated');
+
+  // Foot braking to stop
+  for (let i = 0; i < 20; i++) {
+    stepVehicleKinematics(sedan, { throttle: -1, steer: 0, handbrake: false }, 0.05, colliders);
+  }
+  assert.ok(sedan.speed <= 0.5, `Sedan should brake to standstill, got ${sedan.speed}`);
+
+  // Reverse gear test from standstill
+  for (let i = 0; i < 15; i++) {
+    stepVehicleKinematics(sedan, { throttle: -1, steer: 0, handbrake: false }, 0.04, colliders);
+  }
+  assert.ok(sedan.speed < -2, `Sedan should reverse backwards, got ${sedan.speed}`);
+  assert.equal(sedan.isReversing, true, 'isReversing flag must be true during reverse gear');
+
+  // Reset and test handbrake drift breakaway
+  sedan.x = 0;
+  sedan.z = 50;
+  sedan.speed = 18;
+  sedan.heading = 0;
+  // Initiate sharp turn with handbrake engaged
+  for (let i = 0; i < 6; i++) {
+    stepVehicleKinematics(sedan, { throttle: 0.8, steer: 1, handbrake: true }, 0.04, colliders);
+  }
+  assert.equal(sedan.isDrifting, true, 'Sedan should enter drift state during handbrake turn');
+  assert.ok(sedan.lateralSlip !== undefined && Math.abs(sedan.lateralSlip) > 0.5, 'Lateral slip should be positive');
+});
+
+test('motorcycle banks into turns while bus experiences outward centrifugal roll', () => {
+  const colliders = buildStaticColliders();
+  const bike: VehicleState = {
+    id: 'test_bike',
+    kind: 'bike',
+    x: 0,
+    y: 0,
+    z: 50,
+    heading: 0,
+    speed: 15,
+    steerAngle: 0,
+    hp: VEHICLE_SPECS.bike.maxHp,
+    maxHp: VEHICLE_SPECS.bike.maxHp,
+    color: VEHICLE_SPECS.bike.defaultColor,
+    driver: 'player',
+    routeIdx: 0,
+    waypointIdx: 0,
+    honkTimer: 0,
+    sirenOn: false,
+    damagedSmoke: false,
+  };
+
+  const bus: VehicleState = {
+    id: 'test_bus',
+    kind: 'bus',
+    x: 20,
+    y: 0,
+    z: 50,
+    heading: 0,
+    speed: 12,
+    steerAngle: 0,
+    hp: VEHICLE_SPECS.bus.maxHp,
+    maxHp: VEHICLE_SPECS.bus.maxHp,
+    color: VEHICLE_SPECS.bus.defaultColor,
+    driver: 'player',
+    routeIdx: 0,
+    waypointIdx: 0,
+    honkTimer: 0,
+    sirenOn: false,
+    damagedSmoke: false,
+  };
+
+  // Turn right (steer = 1)
+  for (let i = 0; i < 8; i++) {
+    stepVehicleKinematics(bike, { throttle: 1, steer: 1, handbrake: false }, 0.04, colliders);
+    stepVehicleKinematics(bus, { throttle: 1, steer: 1, handbrake: false }, 0.04, colliders);
+  }
+
+  // 2-wheeler bike banks into turn (positive roll angle)
+  assert.ok(bike.roll !== undefined && bike.roll > 0.05, `Bike should bank into turn, got roll ${bike.roll}`);
+  // 4-wheeler bus rolls outward from centrifugal force (negative roll angle)
+  assert.ok(bus.roll !== undefined && bus.roll < -0.01, `Bus should lean outward, got roll ${bus.roll}`);
+});
+
+test('every vehicle kind in VEHICLE_SPECS has authentic Dhaka handling parameters', () => {
+  const kinds = ['sedan', 'bike', 'cng', 'bus', 'truck', 'rickshaw', 'police'] as const;
+  for (const k of kinds) {
+    const spec = VEHICLE_SPECS[k];
+    assert.ok(spec, `Vehicle spec for ${k} must exist`);
+    assert.ok(spec.maxSpeed > 0, `${k} maxSpeed must be positive`);
+    assert.ok(spec.accel > 0, `${k} accel must be positive`);
+    assert.ok(spec.brake > 0, `${k} brake must be positive`);
+    assert.ok(spec.turnRate > 0, `${k} turnRate must be positive`);
+    assert.ok(spec.mass > 0, `${k} mass must be positive`);
+    assert.ok(spec.banglaName.length > 0, `${k} must have authentic Bangla name`);
+  }
+  // Sedan has high speed and drift capability
+  assert.equal(VEHICLE_SPECS.sedan.canDrift, true);
+  assert.ok(VEHICLE_SPECS.sedan.maxSpeed >= 28);
+  // Bus has highest mass
+  assert.ok(VEHICLE_SPECS.bus.mass >= VEHICLE_SPECS.sedan.mass * 2);
+  // Rickshaw is low speed authentic Dhaka pedaled rickshaw
+  assert.ok(VEHICLE_SPECS.rickshaw.maxSpeed <= 15);
 });

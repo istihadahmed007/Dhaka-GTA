@@ -9,13 +9,20 @@ import {
   ROAD_SEGMENTS,
 } from './worldData';
 import {
+  createAhsanManzilDome,
+  createBaitulMukarramFacade,
   createBurigangaBoat,
   createBusStopShelter,
+  createLalbaghFortGate,
+  createMetroRailStation,
+  createMetroRailViaductPillar,
   createOldDhakaGateArch,
   createOverheadGantrySign,
   createSadarghatLaunch,
   createShaplaMonument,
 } from './models';
+import { getCachedDhakaLandmarkTemplate, instantiateGlbLandmark } from './assetLoader';
+import { WorldChunkManager } from './worldChunks';
 import { createHighwayGantryTexture, createSignboardTexture, DhakaTextureSet } from './textures';
 
 export interface SkyDomeUniforms {
@@ -48,7 +55,13 @@ export interface WorldVisualHandles {
   rainPoints: THREE.Points;
   rainPositions: Float32Array;
   rainMaxCount: number;
+  canopyInst?: THREE.InstancedMesh;
+  palmFrondInst?: THREE.InstancedMesh;
+  kcCanopyInst?: THREE.InstancedMesh;
+  rainStreaks?: THREE.LineSegments;
+  rainSplashInst?: THREE.InstancedMesh;
   cameraOccluders: THREE.Object3D[];
+  chunkManager: WorldChunkManager;
   disposables: Array<{ dispose: () => void }>;
 }
 
@@ -228,22 +241,28 @@ export function buildDhakaWorld(
   root.add(pierPostInst, pierHeadInst);
   disposables.push(pierPostGeo, pierPostMat, pierHeadGeo, pierHeadMat);
 
-  // Buriganga River Water Surface with animated procedural ripple bump map
+  // Buriganga River Water Surface with animated procedural ripple bump map & PBR normal wave
   const riverBump = textures.waterBumpMap.clone();
   riverBump.needsUpdate = true;
   riverBump.repeat.set(28, 9);
-  disposables.push(riverBump);
+
+  const riverNormal = textures.waterNormalMap.clone();
+  riverNormal.needsUpdate = true;
+  riverNormal.repeat.set(24, 8);
+  disposables.push(riverBump, riverNormal);
 
   const riverGeo = new THREE.PlaneGeometry(1500, 380, 28, 14);
   riverGeo.rotateX(-Math.PI / 2);
   const riverMat = new THREE.MeshStandardMaterial({
-    color: 0x11495f,
+    color: 0x0e3f52,
+    normalMap: riverNormal,
+    normalScale: new THREE.Vector2(2.0, 2.0),
     bumpMap: riverBump,
-    bumpScale: 0.14,
-    roughness: 0.12,
-    metalness: 0.54,
-    emissive: 0x061f2c,
-    emissiveIntensity: 0.08,
+    bumpScale: 0.12,
+    roughness: 0.08,
+    metalness: 0.62,
+    emissive: 0x041822,
+    emissiveIntensity: 0.06,
   });
   const riverMesh = new THREE.Mesh(riverGeo, riverMat);
   riverMesh.position.set(0, -1.05, RIVER_Z_START + 190);
@@ -369,11 +388,16 @@ export function buildDhakaWorld(
   const lakeBump = textures.waterBumpMap.clone();
   lakeBump.needsUpdate = true;
   lakeBump.repeat.set(6, 4);
-  disposables.push(lakeBump);
+  const lakeNormal = textures.waterNormalMap.clone();
+  lakeNormal.needsUpdate = true;
+  lakeNormal.repeat.set(6, 4);
+  disposables.push(lakeBump, lakeNormal);
 
   const lakeRimMat = new THREE.MeshStandardMaterial({ color: 0x8c8478, roughness: 0.85 });
   const lakeWaterMat = new THREE.MeshStandardMaterial({
     color: 0x0d6b86,
+    normalMap: lakeNormal,
+    normalScale: new THREE.Vector2(1.2, 1.2),
     bumpMap: lakeBump,
     bumpScale: 0.1,
     roughness: 0.12,
@@ -439,7 +463,14 @@ export function buildDhakaWorld(
     const roadNormalTex = textures.asphaltNormal.clone();
     roadNormalTex.needsUpdate = true;
     roadNormalTex.repeat.set(1, repY);
-    disposables.push(roadTex, roadRoughTex, roadNormalTex);
+
+    const puddleRoughTex = textures.puddleRoughness.clone();
+    puddleRoughTex.needsUpdate = true;
+    puddleRoughTex.repeat.set(1, repY);
+    const puddleNormalTex = textures.puddleNormal.clone();
+    puddleNormalTex.needsUpdate = true;
+    puddleNormalTex.repeat.set(1, repY);
+    disposables.push(roadTex, roadRoughTex, roadNormalTex, puddleRoughTex, puddleNormalTex);
 
     const roadGeo = new THREE.PlaneGeometry(seg.width, len);
     roadGeo.rotateX(-Math.PI / 2);
@@ -455,7 +486,9 @@ export function buildDhakaWorld(
       polygonOffsetFactor: -1,
       polygonOffsetUnits: -1,
     });
-    roadMat.userData.wetRoughnessMap = roadRoughTex;
+    roadMat.userData.wetRoughnessMap = puddleRoughTex;
+    roadMat.userData.wetNormalMap = puddleNormalTex;
+    roadMat.userData.dryNormalMap = roadNormalTex;
     roadMaterials.push(roadMat);
 
     const mesh = new THREE.Mesh(roadGeo, roadMat);
@@ -475,7 +508,9 @@ export function buildDhakaWorld(
     roughness: 0.88,
     metalness: 0.04,
   });
-  roundMat.userData.wetRoughnessMap = textures.asphaltRoughness;
+  roundMat.userData.wetRoughnessMap = textures.puddleRoughness;
+  roundMat.userData.wetNormalMap = textures.puddleNormal;
+  roundMat.userData.dryNormalMap = null;
   roadMaterials.push(roundMat);
   const roundMesh = new THREE.Mesh(roundGeo, roundMat);
   roundMesh.position.y = 0.052;
@@ -635,8 +670,10 @@ export function buildDhakaWorld(
   ];
   const stripeGeo = new THREE.PlaneGeometry(0.85, 3.2);
   stripeGeo.rotateX(-Math.PI / 2);
-  const stripeMat = new THREE.MeshBasicMaterial({
-    color: 0xeae6dc,
+  const stripeMat = new THREE.MeshStandardMaterial({
+    map: textures.crosswalkMap,
+    roughness: 0.82,
+    metalness: 0.04,
     polygonOffset: true,
     polygonOffsetFactor: -2,
     polygonOffsetUnits: -2,
@@ -662,6 +699,35 @@ export function buildDhakaWorld(
   crosswalkInst.computeBoundingSphere();
   root.add(crosswalkInst);
   disposables.push(stripeGeo, stripeMat);
+
+  // Instanced Authentic Dhaka WASA Cast-Iron Drainage Manhole Covers along curbs
+  const manholeCoords: Array<[number, number]> = [
+    [-6.8, -190], [6.8, -140], [-6.8, -90], [6.8, -40],
+    [-6.8, 30], [6.8, 75], [-6.8, 115], [6.8, 160],
+    [-190, -6.8], [-130, 6.8], [-85, -6.8], [-35, 6.8],
+    [35, -6.8], [80, 6.8], [125, -6.8], [175, 6.8],
+    [58, 58], [-58, 58], [58, -58], [-58, -58],
+  ];
+  const manholeGeo = new THREE.CylinderGeometry(0.55, 0.55, 0.04, 16);
+  manholeGeo.translate(0, 0.02, 0);
+  const manholeMat = new THREE.MeshStandardMaterial({
+    map: textures.manholeMap,
+    roughness: 0.58,
+    metalness: 0.76,
+  });
+  const manholeInst = new THREE.InstancedMesh(manholeGeo, manholeMat, manholeCoords.length);
+  manholeCoords.forEach(([mx, mz], mi) => {
+    dummy.position.set(mx, 0.051, mz);
+    dummy.rotation.set(0, (mi * 1.3) % Math.PI, 0);
+    dummy.scale.set(1, 1, 1);
+    dummy.updateMatrix();
+    manholeInst.setMatrixAt(mi, dummy.matrix);
+  });
+  manholeInst.instanceMatrix.needsUpdate = true;
+  manholeInst.computeBoundingSphere();
+  manholeInst.receiveShadow = true;
+  root.add(manholeInst);
+  disposables.push(manholeGeo, manholeMat);
 
   // Iconic Shapla Monument Hero Landmark at (0, 0)
   const shapla = createShaplaMonument(textures);
@@ -698,386 +764,285 @@ export function buildDhakaWorld(
   const heroBuildings = BUILDINGS.filter((b) => b.isHero);
   const procBuildings = BUILDINGS.filter((b) => !b.isHero);
 
-  // 4a. Build Hero & Signed Landmarks individually with night window glow, setbacks & greenery
-  heroBuildings.forEach((b: BuildingSpec) => {
-    const grp = new THREE.Group();
-    grp.position.set(b.x, 0, b.z);
+  // 4. Spatial Chunk Partitioning & 3-Tier Dynamic Level-of-Detail (LOD) Streaming
+  const chunkManager = new WorldChunkManager();
+  root.add(chunkManager.getRoot());
+  disposables.push({ dispose: () => chunkManager.dispose() });
 
-    let mapTex: THREE.Texture | null = null;
-    let normalTex: THREE.Texture | null = null;
-    let emissiveTex: THREE.Texture | null = null;
-    let roughTex: THREE.Texture | null = null;
-    let roughness = 0.78;
-    let metalness = 0.08;
+  chunkManager.partitionBuildings(BUILDINGS);
 
-    if (b.style === 'old_dhaka' || b.style === 'shop') {
-      mapTex = textures.brickFacadeMap;
-      normalTex = textures.brickNormal;
-      emissiveTex = textures.brickEmissiveMap;
-      roughness = 0.86;
-    } else if (b.style === 'gulshan_tower') {
-      mapTex = textures.glassTowerMap;
-      emissiveTex = textures.glassTowerEmissiveMap;
-      roughTex = textures.glassRoughnessMap;
-      roughness = 0.22;
-      metalness = 0.66;
-    } else if (b.style === 'motijheel_tower') {
-      mapTex = textures.motijheelTowerMap;
-      emissiveTex = textures.motijheelEmissiveMap;
-      roughTex = textures.glassRoughnessMap;
-      roughness = 0.3;
-      metalness = 0.48;
-    } else if (b.style === 'market_hall' || b.style === 'warehouse') {
-      mapTex = textures.marketFacadeMap;
-      emissiveTex = textures.brickEmissiveMap;
-      roughness = 0.76;
-    } else if (b.style === 'residential' || b.style === 'police') {
-      mapTex = textures.residentialMap;
-      emissiveTex = textures.residentialEmissiveMap;
-      roughness = 0.78;
-    }
-
-    const wallMat = new THREE.MeshStandardMaterial({
-      color: b.style === 'gulshan_tower' || b.style === 'motijheel_tower' ? 0xffffff : b.color,
-      map: mapTex,
-      normalMap: normalTex,
-      normalScale: normalTex ? new THREE.Vector2(0.7, 0.7) : new THREE.Vector2(1, 1),
-      roughnessMap: roughTex,
-      emissiveMap: emissiveTex,
-      emissive: emissiveTex ? 0xffffff : 0x000000,
-      emissiveIntensity: 0.1,
-      roughness,
-      metalness,
-    });
-    if (emissiveTex) nightWindowMaterials.push(wallMat);
-
-    const accentMat = new THREE.MeshStandardMaterial({
-      color: b.accentColor,
-      roughness: 0.48,
-      metalness: 0.22,
-    });
-    disposables.push(wallMat, accentMat);
-
-    const bodyGeo = new THREE.BoxGeometry(b.w, b.h, b.d);
-    const body = new THREE.Mesh(bodyGeo, wallMat);
-    body.position.y = b.h / 2;
-    if (castShadow) {
-      body.castShadow = true;
-      body.receiveShadow = true;
-    }
-    grp.add(body);
-    cameraOccluders.push(body);
-    disposables.push(bodyGeo);
-
-    // Ground-floor shopfront band & cornice parapet
-    const plinthGeo = new THREE.BoxGeometry(b.w + 0.32, 0.55, b.d + 0.32);
-    const plinth = new THREE.Mesh(plinthGeo, accentMat);
-    plinth.position.y = 3.6;
-    grp.add(plinth);
-    disposables.push(plinthGeo);
-
-    const roofCapGeo = new THREE.BoxGeometry(b.w + 0.48, 0.65, b.d + 0.48);
-    const roofCap = new THREE.Mesh(roofCapGeo, parapetMat);
-    roofCap.position.y = b.h + 0.28;
-    grp.add(roofCap);
-    disposables.push(roofCapGeo);
-
-    // High-rise skyline stepped setback crown + glowing LED accent band + landscaped setback hedges
-    if (b.style === 'gulshan_tower' || b.style === 'motijheel_tower') {
-      const crownGeo = new THREE.BoxGeometry(b.w * 0.62, 4.2, b.d * 0.62);
-      const crown = new THREE.Mesh(crownGeo, wallMat);
-      crown.position.y = b.h + 2.3;
-      grp.add(crown);
-      disposables.push(crownGeo);
-
-      const ledGeo = new THREE.BoxGeometry(b.w * 0.64, 0.36, b.d * 0.64);
-      const ledBand = new THREE.Mesh(ledGeo, crownLedMat);
-      ledBand.position.y = b.h + 4.45;
-      grp.add(ledBand);
-      disposables.push(ledGeo);
-
-      // Landscaped corporate plaza planter hedges along street frontage
-      const hedgeGeo = new THREE.BoxGeometry(b.w * 0.72, 0.65, 0.9);
-      const hedgeSide = b.z > 0 ? -(b.d / 2 + 0.55) : b.d / 2 + 0.55;
-      const hedge = new THREE.Mesh(hedgeGeo, hedgeMat);
-      hedge.position.set(0, 0.325, hedgeSide);
-      grp.add(hedge);
-      disposables.push(hedgeGeo);
-
-      if (b.h >= 38) {
-        const spireGeo = new THREE.CylinderGeometry(0.12, 0.25, 7.8, 6);
-        const spire = new THREE.Mesh(spireGeo, parapetMat);
-        spire.position.y = b.h + 8.3;
-        grp.add(spire);
-        disposables.push(spireGeo);
-      }
-    }
-
-    // Corrugated tin shop awnings
-    if (b.hasAwning) {
-      const awningGeo = new THREE.BoxGeometry(b.w * 0.85, 0.16, 2.2);
-      const awning = new THREE.Mesh(awningGeo, accentMat);
-      const sideSign = b.z > 0 ? -1 : 1;
-      awning.position.set(0, 3.3, sideSign * (b.d / 2 + 1.0));
-      awning.rotation.x = sideSign * 0.24;
-      grp.add(awning);
-      disposables.push(awningGeo);
-    }
-
-    // Iconic Dhaka plastic rooftop water tanks
-    if (b.hasWaterTank) {
-      const tankGeo = new THREE.CylinderGeometry(0.75, 0.8, 1.55, 10);
-      const tank = new THREE.Mesh(tankGeo, b.id.length % 2 === 0 ? tankMat : tankBlueMat);
-      tank.position.set(b.w * 0.24, b.h + 1.25, -b.d * 0.2);
-      grp.add(tank);
-      disposables.push(tankGeo);
-    }
-
-    // Illuminated bilingual Bengali + English signboard
-    if (b.signText && b.signBangla) {
-      const signTex = createSignboardTexture(b.signText, b.signBangla, 0x161c24, b.accentColor);
-      const signMat = new THREE.MeshStandardMaterial({
-        map: signTex,
-        emissiveMap: signTex,
-        emissive: 0xffffff,
-        emissiveIntensity: 0.45,
-        roughness: 0.3,
-      });
-      signMaterials.push(signMat);
-      disposables.push(signTex, signMat);
-
-      const signGeo = new THREE.BoxGeometry(Math.min(b.w * 0.82, 9.2), 1.9, 0.24);
-      const signMesh = new THREE.Mesh(signGeo, signMat);
-      const faceFrontZ = b.z > 0 ? -(b.d / 2 + 0.18) : b.d / 2 + 0.18;
-      signMesh.position.set(0, Math.min(b.h - 1.2, 5.2), faceFrontZ);
-      if (b.z > 0) signMesh.rotation.y = Math.PI;
-      grp.add(signMesh);
-      disposables.push(signGeo);
-    }
-
-    root.add(grp);
-  });
-
-  // 4b. Batch all ~100+ Expanded Procedural Buildings into 5 InstancedMeshes with Night Window Emissives
   const unitBoxGeo = new THREE.BoxGeometry(1, 1, 1);
   unitBoxGeo.translate(0, 0.5, 0);
   disposables.push(unitBoxGeo);
 
-  const styleGroups: Record<string, BuildingSpec[]> = {
-    old_dhaka: [],
-    gulshan_tower: [],
-    motijheel_tower: [],
-    residential: [],
-    market: [],
-  };
-  procBuildings.forEach((b) => {
-    if (b.style === 'old_dhaka' || b.style === 'shop') styleGroups.old_dhaka.push(b);
-    else if (b.style === 'gulshan_tower') styleGroups.gulshan_tower.push(b);
-    else if (b.style === 'motijheel_tower') styleGroups.motijheel_tower.push(b);
-    else if (b.style === 'market_hall' || b.style === 'warehouse') styleGroups.market.push(b);
-    else styleGroups.residential.push(b);
+  const lod2ProxyMat = new THREE.MeshStandardMaterial({
+    color: 0x738290,
+    roughness: 0.88,
+    metalness: 0.08,
   });
+  disposables.push(lod2ProxyMat);
 
-  const styleMaterials: Record<string, THREE.MeshStandardMaterial> = {
-    old_dhaka: new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      map: textures.brickFacadeMap,
-      normalMap: textures.brickNormal,
-      normalScale: new THREE.Vector2(0.65, 0.65),
-      emissiveMap: textures.brickEmissiveMap,
-      emissive: 0xffffff,
-      emissiveIntensity: 0.1,
-      roughness: 0.86,
-      metalness: 0.04,
-    }),
-    gulshan_tower: new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      map: textures.glassTowerMap,
-      roughnessMap: textures.glassRoughnessMap,
-      emissiveMap: textures.glassTowerEmissiveMap,
-      emissive: 0xffffff,
-      emissiveIntensity: 0.12,
-      roughness: 0.22,
-      metalness: 0.64,
-    }),
-    motijheel_tower: new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      map: textures.motijheelTowerMap,
-      roughnessMap: textures.glassRoughnessMap,
-      emissiveMap: textures.motijheelEmissiveMap,
-      emissive: 0xffffff,
-      emissiveIntensity: 0.12,
-      roughness: 0.3,
-      metalness: 0.46,
-    }),
-    residential: new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      map: textures.residentialMap,
-      emissiveMap: textures.residentialEmissiveMap,
-      emissive: 0xffffff,
-      emissiveIntensity: 0.1,
-      roughness: 0.78,
-      metalness: 0.05,
-    }),
-    market: new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      map: textures.marketFacadeMap,
-      emissiveMap: textures.brickEmissiveMap,
-      emissive: 0xffffff,
-      emissiveIntensity: 0.08,
-      roughness: 0.75,
-      metalness: 0.14,
-    }),
-  };
+  // Build each chunk's 3 LOD tiers (LOD 0: Full high-detail + custom 3D landmarks, LOD 1: Architectural mass, LOD 2: Silhouette box)
+  chunkManager.getChunks().forEach((chunk) => {
+    chunk.buildings.forEach((b: BuildingSpec) => {
+      let mapTex: THREE.Texture | null = null;
+      let normalTex: THREE.Texture | null = null;
+      let emissiveTex: THREE.Texture | null = null;
+      let roughTex: THREE.Texture | null = null;
+      let roughness = 0.78;
+      let metalness = 0.08;
 
-  Object.entries(styleGroups).forEach(([key, list]) => {
-    const mat = styleMaterials[key];
-    nightWindowMaterials.push(mat);
-    disposables.push(mat);
-    if (list.length === 0) return;
-
-    const inst = new THREE.InstancedMesh(unitBoxGeo, mat, list.length);
-    list.forEach((b, i) => {
-      dummy.position.set(b.x, 0, b.z);
-      dummy.rotation.set(0, 0, 0);
-      dummy.scale.set(b.w, b.h, b.d);
-      dummy.updateMatrix();
-      inst.setMatrixAt(i, dummy.matrix);
-      if (key === 'gulshan_tower' || key === 'motijheel_tower') {
-        tintColor.setHSL(0.56 + (i % 5) * 0.015, 0.16, 0.88 + (i % 3) * 0.04);
-      } else {
-        tintColor.setHex(b.color).lerp(new THREE.Color(0xffffff), 0.35);
+      if (b.style === 'old_dhaka' || b.style === 'shop') {
+        mapTex = textures.brickFacadeMap;
+        normalTex = textures.brickNormal;
+        emissiveTex = textures.brickEmissiveMap;
+        roughness = 0.86;
+      } else if (b.style === 'gulshan_tower') {
+        mapTex = textures.glassTowerMap;
+        emissiveTex = textures.glassTowerEmissiveMap;
+        roughTex = textures.glassRoughnessMap;
+        roughness = 0.22;
+        metalness = 0.66;
+      } else if (b.style === 'motijheel_tower') {
+        mapTex = textures.motijheelTowerMap;
+        emissiveTex = textures.motijheelEmissiveMap;
+        roughTex = textures.glassRoughnessMap;
+        roughness = 0.3;
+        metalness = 0.48;
+      } else if (b.style === 'market_hall' || b.style === 'warehouse') {
+        mapTex = textures.marketFacadeMap;
+        emissiveTex = textures.brickEmissiveMap;
+        roughness = 0.76;
+      } else if (b.style === 'residential' || b.style === 'police') {
+        mapTex = textures.residentialMap;
+        emissiveTex = textures.residentialEmissiveMap;
+        roughness = 0.78;
+      } else if (b.style === 'pink_palace') {
+        mapTex = textures.brickFacadeMap;
+        normalTex = textures.brickNormal;
+        emissiveTex = textures.brickEmissiveMap;
+        roughness = 0.74;
+        metalness = 0.12;
+      } else if (b.style === 'mughal_fort') {
+        mapTex = textures.brickFacadeMap;
+        normalTex = textures.brickNormal;
+        emissiveTex = textures.brickEmissiveMap;
+        roughness = 0.86;
+        metalness = 0.05;
+      } else if (b.style === 'national_mosque') {
+        mapTex = textures.residentialMap;
+        emissiveTex = textures.residentialEmissiveMap;
+        roughness = 0.4;
+        metalness = 0.15;
+      } else if (b.style === 'metro_station') {
+        mapTex = textures.motijheelTowerMap;
+        roughTex = textures.glassRoughnessMap;
+        emissiveTex = textures.glassTowerEmissiveMap;
+        roughness = 0.35;
+        metalness = 0.55;
       }
-      inst.setColorAt(i, tintColor);
-    });
-    inst.instanceMatrix.needsUpdate = true;
-    if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
-    inst.computeBoundingSphere();
-    if (castShadow) {
-      inst.castShadow = true;
-      inst.receiveShadow = true;
-    }
-    root.add(inst);
-    cameraOccluders.push(inst);
-  });
 
-  // Instanced Roof Parapets, Stepped Tower Crowns, Balconies, AC Units, Water Tanks & Shopfront Awnings
-  if (procBuildings.length > 0) {
-    const parapetInst = new THREE.InstancedMesh(unitBoxGeo, parapetMat, procBuildings.length);
-    const awningList = procBuildings.filter((b) => b.hasAwning);
-    const tankList = procBuildings.filter((b) => b.hasWaterTank);
-    const towerList = procBuildings.filter((b) => b.style === 'gulshan_tower' || b.style === 'motijheel_tower');
-    const balconyBuildings = procBuildings.filter((b) => b.style === 'old_dhaka' || b.style === 'residential');
-
-    procBuildings.forEach((b, i) => {
-      dummy.position.set(b.x, b.h, b.z);
-      dummy.rotation.set(0, 0, 0);
-      dummy.scale.set(b.w + 0.45, 0.62, b.d + 0.45);
-      dummy.updateMatrix();
-      parapetInst.setMatrixAt(i, dummy.matrix);
-    });
-    parapetInst.instanceMatrix.needsUpdate = true;
-    parapetInst.computeBoundingSphere();
-    root.add(parapetInst);
-
-    // Stepped upper setbacks on procedural Gulshan & Motijheel glass towers for richer skyline silhouettes
-    if (towerList.length > 0) {
-      const crownInst = new THREE.InstancedMesh(unitBoxGeo, styleMaterials.gulshan_tower, towerList.length);
-      towerList.forEach((b, i) => {
-        const crownH = 3.2 + (i % 3) * 1.4;
-        dummy.position.set(b.x, b.h + 0.4, b.z);
-        dummy.rotation.set(0, 0, 0);
-        dummy.scale.set(b.w * 0.58, crownH, b.d * 0.58);
-        dummy.updateMatrix();
-        crownInst.setMatrixAt(i, dummy.matrix);
+      const wallMat = new THREE.MeshStandardMaterial({
+        color: b.style === 'gulshan_tower' || b.style === 'motijheel_tower' ? 0xffffff : b.color,
+        map: mapTex,
+        normalMap: normalTex,
+        normalScale: normalTex ? new THREE.Vector2(0.7, 0.7) : new THREE.Vector2(1, 1),
+        roughnessMap: roughTex,
+        emissiveMap: emissiveTex,
+        emissive: emissiveTex ? 0xffffff : 0x000000,
+        emissiveIntensity: 0.1,
+        roughness,
+        metalness,
       });
-      crownInst.instanceMatrix.needsUpdate = true;
-      crownInst.computeBoundingSphere();
-      root.add(crownInst);
-    }
+      if (emissiveTex) nightWindowMaterials.push(wallMat);
 
-    // 3D Protruding Dhaka Balconies & External AC Condenser Units on Old Dhaka & Residential facades
-    if (balconyBuildings.length > 0) {
-      const balconyPlacements: Array<{ x: number; y: number; z: number; w: number }> = [];
-      const acPlacements: Array<{ x: number; y: number; z: number }> = [];
-      balconyBuildings.forEach((b) => {
+      const accentMat = new THREE.MeshStandardMaterial({
+        color: b.accentColor,
+        roughness: 0.48,
+        metalness: 0.22,
+      });
+      disposables.push(wallMat, accentMat);
+
+      // --- TIER 0: Full High Detail LOD ---
+      const lod0Grp = new THREE.Group();
+      lod0Grp.position.set(b.x, 0, b.z);
+
+      const bodyGeo = new THREE.BoxGeometry(b.w, b.h, b.d);
+      const body = new THREE.Mesh(bodyGeo, wallMat);
+      body.position.y = b.h / 2;
+      if (castShadow) {
+        body.castShadow = true;
+        body.receiveShadow = true;
+      }
+      lod0Grp.add(body);
+      cameraOccluders.push(body);
+      disposables.push(bodyGeo);
+
+      // Ground plinth band & parapet roof cap
+      const plinthGeo = new THREE.BoxGeometry(b.w + 0.32, 0.55, b.d + 0.32);
+      const plinth = new THREE.Mesh(plinthGeo, accentMat);
+      plinth.position.y = 3.6;
+      lod0Grp.add(plinth);
+      disposables.push(plinthGeo);
+
+      const roofCapGeo = new THREE.BoxGeometry(b.w + 0.48, 0.65, b.d + 0.48);
+      const roofCap = new THREE.Mesh(roofCapGeo, parapetMat);
+      roofCap.position.y = b.h + 0.28;
+      lod0Grp.add(roofCap);
+      disposables.push(roofCapGeo);
+
+      // Authentic Dhaka 3D procedural or GLB landmark visual features
+      if (b.style === 'pink_palace') {
+        const glbLandmark = getCachedDhakaLandmarkTemplate();
+        if (glbLandmark) {
+          const landmarkGroup = instantiateGlbLandmark(glbLandmark, castShadow);
+          lod0Grp.add(landmarkGroup);
+        } else {
+          const landmark = createAhsanManzilDome(b.w, b.d, b.h, b.color, b.accentColor);
+          lod0Grp.add(landmark.group);
+          disposables.push(...landmark.disposables);
+        }
+      } else if (b.style === 'mughal_fort') {
+        const landmark = createLalbaghFortGate(b.w, b.d, b.h, b.color, b.accentColor);
+        lod0Grp.add(landmark.group);
+        disposables.push(...landmark.disposables);
+      } else if (b.style === 'national_mosque') {
+        const landmark = createBaitulMukarramFacade(b.w, b.d, b.h, b.color, b.accentColor);
+        lod0Grp.add(landmark.group);
+        disposables.push(...landmark.disposables);
+      } else if (b.style === 'metro_station') {
+        const landmark = createMetroRailStation(b.w, b.d, b.h, b.color, b.accentColor);
+        lod0Grp.add(landmark.group);
+        disposables.push(...landmark.disposables);
+      }
+
+      // High-rise stepped crown setback + LED band + plaza hedges
+      if (b.style === 'gulshan_tower' || b.style === 'motijheel_tower') {
+        const crownH = b.isHero ? 4.2 : 3.2 + (b.id.length % 3) * 1.4;
+        const crownGeo = new THREE.BoxGeometry(b.w * 0.62, crownH, b.d * 0.62);
+        const crown = new THREE.Mesh(crownGeo, wallMat);
+        crown.position.y = b.h + crownH / 2;
+        lod0Grp.add(crown);
+        disposables.push(crownGeo);
+
+        const ledGeo = new THREE.BoxGeometry(b.w * 0.64, 0.36, b.d * 0.64);
+        const ledBand = new THREE.Mesh(ledGeo, crownLedMat);
+        ledBand.position.y = b.h + crownH + 0.18;
+        lod0Grp.add(ledBand);
+        disposables.push(ledGeo);
+
+        const hedgeGeo = new THREE.BoxGeometry(b.w * 0.72, 0.65, 0.9);
+        const hedgeSide = b.z > 0 ? -(b.d / 2 + 0.55) : b.d / 2 + 0.55;
+        const hedge = new THREE.Mesh(hedgeGeo, hedgeMat);
+        hedge.position.set(0, 0.325, hedgeSide);
+        lod0Grp.add(hedge);
+        disposables.push(hedgeGeo);
+
+        if (b.h >= 38) {
+          const spireGeo = new THREE.CylinderGeometry(0.12, 0.25, 7.8, 6);
+          const spire = new THREE.Mesh(spireGeo, parapetMat);
+          spire.position.y = b.h + crownH + 4.2;
+          lod0Grp.add(spire);
+          disposables.push(spireGeo);
+        }
+      }
+
+      // Shop Awnings
+      if (b.hasAwning) {
+        const awningGeo = new THREE.BoxGeometry(b.w * 0.85, 0.16, 2.2);
+        const awning = new THREE.Mesh(awningGeo, accentMat);
         const sideSign = b.z > 0 ? -1 : 1;
-        const faceZ = b.z + sideSign * (b.d / 2 + 0.42);
+        awning.position.set(0, 3.3, sideSign * (b.d / 2 + 1.0));
+        awning.rotation.x = sideSign * 0.24;
+        lod0Grp.add(awning);
+        disposables.push(awningGeo);
+      }
+
+      // Rooftop Water Tanks
+      if (b.hasWaterTank) {
+        const tankGeo = new THREE.CylinderGeometry(0.75, 0.8, 1.55, 10);
+        const tank = new THREE.Mesh(tankGeo, b.id.length % 2 === 0 ? tankMat : tankBlueMat);
+        tank.position.set(b.w * 0.24, b.h + 1.25, -b.d * 0.2);
+        lod0Grp.add(tank);
+        disposables.push(tankGeo);
+      }
+
+      // Bilingual Illuminated Signboard
+      if (b.signText && b.signBangla) {
+        const signTex = createSignboardTexture(b.signText, b.signBangla, 0x161c24, b.accentColor);
+        const signMat = new THREE.MeshStandardMaterial({
+          map: signTex,
+          emissiveMap: signTex,
+          emissive: 0xffffff,
+          emissiveIntensity: 0.45,
+          roughness: 0.3,
+        });
+        signMaterials.push(signMat);
+        disposables.push(signTex, signMat);
+
+        const signGeo = new THREE.BoxGeometry(Math.min(b.w * 0.82, 9.2), 1.9, 0.24);
+        const signMesh = new THREE.Mesh(signGeo, signMat);
+        const faceFrontZ = b.z > 0 ? -(b.d / 2 + 0.18) : b.d / 2 + 0.18;
+        signMesh.position.set(0, Math.min(b.h - 1.2, 5.2), faceFrontZ);
+        if (b.z > 0) signMesh.rotation.y = Math.PI;
+        lod0Grp.add(signMesh);
+        disposables.push(signGeo);
+      }
+
+      // Protruding 3D Balconies & AC Units for Residential/Old Dhaka
+      if (!b.isHero && (b.style === 'old_dhaka' || b.style === 'residential')) {
+        const sideSign = b.z > 0 ? -1 : 1;
+        const faceZ = sideSign * (b.d / 2 + 0.42);
         const floors = Math.min(3, Math.max(1, Math.floor((b.h - 4) / 4.2)));
+        const balcMat = new THREE.MeshStandardMaterial({ color: 0xbcb5a8, roughness: 0.82 });
+        const acMat = new THREE.MeshStandardMaterial({ color: 0xdbe2e8, roughness: 0.55, metalness: 0.25 });
+        disposables.push(balcMat, acMat);
+
         for (let fl = 0; fl < floors; fl++) {
           const fy = 4.6 + fl * 4.1;
           if (fy + 1.4 > b.h) break;
-          balconyPlacements.push({ x: b.x - b.w * 0.16, y: fy, z: faceZ, w: Math.min(3.8, b.w * 0.38) });
-          acPlacements.push({ x: b.x + b.w * 0.24, y: fy + 0.6, z: b.z + sideSign * (b.d / 2 + 0.24) });
+          const balcGeo = new THREE.BoxGeometry(Math.min(3.8, b.w * 0.38), 0.95, 0.82);
+          const balc = new THREE.Mesh(balcGeo, balcMat);
+          balc.position.set(-b.w * 0.16, fy, faceZ);
+          lod0Grp.add(balc);
+          disposables.push(balcGeo);
+
+          const acGeo = new THREE.BoxGeometry(0.86, 0.58, 0.44);
+          const ac = new THREE.Mesh(acGeo, acMat);
+          ac.position.set(b.w * 0.24, fy + 0.6, sideSign * (b.d / 2 + 0.24));
+          lod0Grp.add(ac);
+          disposables.push(acGeo);
         }
-      });
+      }
 
-      const balcMat = new THREE.MeshStandardMaterial({ color: 0xbcb5a8, roughness: 0.82 });
-      const balcInst = new THREE.InstancedMesh(unitBoxGeo, balcMat, balconyPlacements.length);
-      balconyPlacements.forEach((p, i) => {
-        dummy.position.set(p.x, p.y, p.z);
-        dummy.rotation.set(0, 0, 0);
-        dummy.scale.set(p.w, 0.95, 0.82);
-        dummy.updateMatrix();
-        balcInst.setMatrixAt(i, dummy.matrix);
-      });
-      balcInst.instanceMatrix.needsUpdate = true;
-      balcInst.computeBoundingSphere();
-      root.add(balcInst);
-      disposables.push(balcMat);
+      chunk.lod0Group.add(lod0Grp);
 
-      const acMat = new THREE.MeshStandardMaterial({ color: 0xdbe2e8, roughness: 0.55, metalness: 0.25 });
-      const acInst = new THREE.InstancedMesh(unitBoxGeo, acMat, acPlacements.length);
-      acPlacements.forEach((p, i) => {
-        dummy.position.set(p.x, p.y, p.z);
-        dummy.rotation.set(0, 0, 0);
-        dummy.scale.set(0.86, 0.58, 0.44);
-        dummy.updateMatrix();
-        acInst.setMatrixAt(i, dummy.matrix);
-      });
-      acInst.instanceMatrix.needsUpdate = true;
-      acInst.computeBoundingSphere();
-      root.add(acInst);
-      disposables.push(acMat);
-    }
+      // --- TIER 1: Medium Architectural LOD (Clean volume + roof parapet) ---
+      const lod1Grp = new THREE.Group();
+      lod1Grp.position.set(b.x, 0, b.z);
+      const lod1Body = new THREE.Mesh(bodyGeo, wallMat);
+      lod1Body.position.y = b.h / 2;
+      const lod1Roof = new THREE.Mesh(roofCapGeo, parapetMat);
+      lod1Roof.position.y = b.h + 0.28;
+      lod1Grp.add(lod1Body, lod1Roof);
+      if (b.style === 'pink_palace' || b.style === 'national_mosque') {
+        const topBlockGeo = new THREE.BoxGeometry(b.w * 0.5, 3.5, b.d * 0.5);
+        const topBlock = new THREE.Mesh(topBlockGeo, wallMat);
+        topBlock.position.y = b.h + 2.0;
+        lod1Grp.add(topBlock);
+        disposables.push(topBlockGeo);
+      }
+      chunk.lod1Group.add(lod1Grp);
 
-    if (awningList.length > 0) {
-      const awningMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55, metalness: 0.2 });
-      const awningInst = new THREE.InstancedMesh(unitBoxGeo, awningMat, awningList.length);
-      awningList.forEach((b, i) => {
-        const sideSign = b.z > 0 ? -1 : 1;
-        dummy.position.set(b.x, 3.25, b.z + sideSign * (b.d / 2 + 1.0));
-        dummy.rotation.set(sideSign * 0.22, 0, 0);
-        dummy.scale.set(b.w * 0.82, 0.16, 2.1);
-        dummy.updateMatrix();
-        awningInst.setMatrixAt(i, dummy.matrix);
-        tintColor.setHex(b.accentColor);
-        awningInst.setColorAt(i, tintColor);
-      });
-      awningInst.instanceMatrix.needsUpdate = true;
-      if (awningInst.instanceColor) awningInst.instanceColor.needsUpdate = true;
-      awningInst.computeBoundingSphere();
-      root.add(awningInst);
-      disposables.push(awningMat);
-    }
+      // --- TIER 2: Distant Silhouette Proxy LOD ---
+      const lod2Mesh = new THREE.Mesh(bodyGeo, lod2ProxyMat);
+      lod2Mesh.position.set(b.x, b.h / 2, b.z);
+      chunk.lod2Group.add(lod2Mesh);
+    });
+  });
 
-    if (tankList.length > 0) {
-      const tankGeo = new THREE.CylinderGeometry(0.72, 0.78, 1.5, 8);
-      tankGeo.translate(0, 0.75, 0);
-      const tankInst = new THREE.InstancedMesh(tankGeo, tankMat, tankList.length);
-      tankList.forEach((b, i) => {
-        dummy.position.set(b.x + b.w * 0.22, b.h + 0.5, b.z - b.d * 0.18);
-        dummy.rotation.set(0, 0, 0);
-        dummy.scale.set(1, 1, 1);
-        dummy.updateMatrix();
-        tankInst.setMatrixAt(i, dummy.matrix);
-      });
-      tankInst.instanceMatrix.needsUpdate = true;
-      tankInst.computeBoundingSphere();
-      root.add(tankInst);
-      disposables.push(tankGeo);
-    }
-  }
+  // Initial LOD update around player spawn (-2.2, 35.2)
+  chunkManager.update(new THREE.Vector3(-2.2, 0, 35.2), true);
 
   // 4c. Outer Dhaka Distant Skyline Silhouette Ring (1 draw call blending into horizon haze, open south over Buriganga)
   const skylinePositions: Array<[number, number, number, number, number]> = [];
@@ -1158,6 +1123,15 @@ export function buildDhakaWorld(
     root.add(pillar, cap);
   });
   disposables.push(pillarGeo, capGeo);
+
+  // Metro Rail MRT-6 Viaduct Pillars along northern corridor (ave_metro_line6, x = 0, z: -244..-144)
+  const metroPillarZs = [-238, -216, -194, -172, -150];
+  metroPillarZs.forEach((pz) => {
+    const pillar = createMetroRailViaductPillar(9.5);
+    pillar.group.position.set(0, 0, pz);
+    root.add(pillar.group);
+    disposables.push(...pillar.disposables);
+  });
 
   // 6. Instanced Multi-Cluster Tropical Dhaka Rain-Trees + Concrete Sidewalk Planter Rings
   const treePositions: Array<[number, number]> = [
@@ -1244,6 +1218,114 @@ export function buildDhakaWorld(
   }
   root.add(trunkInst, planterInst, canopyInst);
   disposables.push(trunkGeo, trunkMat, planterGeo, planterMat, canopyGeo, canopyMat);
+
+  // 6b. Instanced Authentic Bengali Coconut Palms (নারিকেল গাছ) along Sadarghat promenade & lakefront
+  const palmCoords: Array<[number, number]> = [
+    [-196, 195], [-162, 195], [-120, 195], [-84, 195], [-44, 195], [-16, 195],
+    [16, 195], [48, 195], [88, 195], [128, 195], [168, 195], [204, 195],
+    [-204, -36], [-160, -36], [-196, -58], [-168, -58],
+  ];
+  const palmTrunkGeo = new THREE.CylinderGeometry(0.18, 0.32, 7.8, 7);
+  palmTrunkGeo.translate(0, 3.9, 0);
+  const palmTrunkMat = new THREE.MeshStandardMaterial({ color: 0x6e5d4f, roughness: 0.94 });
+  const palmFrondGeo = new THREE.PlaneGeometry(1.5, 3.8);
+  palmFrondGeo.translate(0, 1.9, 0);
+  const palmLeafMat = new THREE.MeshStandardMaterial({
+    map: textures.palmLeafMap,
+    alphaTest: 0.35,
+    side: THREE.DoubleSide,
+    roughness: 0.65,
+    metalness: 0.04,
+  });
+  const frondsPerPalm = 6;
+  const palmTrunkInst = new THREE.InstancedMesh(palmTrunkGeo, palmTrunkMat, palmCoords.length);
+  const palmFrondInst = new THREE.InstancedMesh(palmFrondGeo, palmLeafMat, palmCoords.length * frondsPerPalm);
+
+  palmCoords.forEach(([px, pz], pi) => {
+    const leanAngle = 0.08 + ((pi * 17) % 7) * 0.015;
+    const leanRot = pi * 1.4;
+    dummy.position.set(px, 0, pz);
+    dummy.rotation.set(Math.sin(leanRot) * leanAngle, leanRot, Math.cos(leanRot) * leanAngle);
+    dummy.scale.set(1, 1, 1);
+    dummy.updateMatrix();
+    palmTrunkInst.setMatrixAt(pi, dummy.matrix);
+
+    const topX = px + Math.sin(leanRot) * leanAngle * 6.8;
+    const topZ = pz + Math.cos(leanRot) * leanAngle * 6.8;
+    for (let fi = 0; fi < frondsPerPalm; fi++) {
+      const frondAngle = (fi / frondsPerPalm) * Math.PI * 2 + leanRot;
+      const droop = 0.68 + (fi % 2) * 0.12;
+      dummy.position.set(topX, 7.5, topZ);
+      dummy.rotation.set(0, 0, 0);
+      dummy.rotateY(frondAngle);
+      dummy.rotateX(droop);
+      dummy.scale.set(1.0 + (fi % 3) * 0.1, 1.0 + (fi % 2) * 0.15, 1.0);
+      dummy.updateMatrix();
+      palmFrondInst.setMatrixAt(pi * frondsPerPalm + fi, dummy.matrix);
+    }
+  });
+  palmTrunkInst.instanceMatrix.needsUpdate = true;
+  palmFrondInst.instanceMatrix.needsUpdate = true;
+  palmTrunkInst.computeBoundingSphere();
+  palmFrondInst.computeBoundingSphere();
+  if (castShadow) {
+    palmTrunkInst.castShadow = true;
+    palmFrondInst.castShadow = true;
+  }
+  root.add(palmTrunkInst, palmFrondInst);
+  disposables.push(palmTrunkGeo, palmTrunkMat, palmFrondGeo, palmLeafMat);
+
+  // 6c. Instanced Dhaka Krishnachura Flame Trees (কৃষ্ণচূড়া - Delonix regia) with vibrant crimson/orange blossoms
+  const krishnachuraCoords: Array<[number, number]> = [
+    [24, 32], [24, 84], [-24, 32], [-24, 84],
+    [24, -32], [24, -84], [-24, -32], [-24, -84],
+    [73, 0], [-73, 0], [115, 48], [-115, 48],
+  ];
+  const kcTrunkGeo = new THREE.CylinderGeometry(0.32, 0.54, 4.2, 8);
+  kcTrunkGeo.translate(0, 2.1, 0);
+  const kcTrunkMat = new THREE.MeshStandardMaterial({ color: 0x4a3b32, roughness: 0.92 });
+  const kcCanopyGeo = new THREE.DodecahedronGeometry(2.35, 1);
+  const kcCanopyMat = new THREE.MeshStandardMaterial({
+    map: textures.krishnachuraMap,
+    roughness: 0.68,
+    metalness: 0.05,
+    alphaTest: 0.18,
+    side: THREE.DoubleSide,
+  });
+  const kcCanopyPerTree = 3;
+  const kcTrunkInst = new THREE.InstancedMesh(kcTrunkGeo, kcTrunkMat, krishnachuraCoords.length);
+  const kcCanopyInst = new THREE.InstancedMesh(kcCanopyGeo, kcCanopyMat, krishnachuraCoords.length * kcCanopyPerTree);
+
+  krishnachuraCoords.forEach(([kx, kz], ki) => {
+    dummy.position.set(kx, 0, kz);
+    dummy.rotation.set(0, ki * 1.25, 0);
+    dummy.scale.set(1.05, 1.05, 1.05);
+    dummy.updateMatrix();
+    kcTrunkInst.setMatrixAt(ki, dummy.matrix);
+
+    const kcOffsets: Array<[number, number, number, number]> = [
+      [0, 4.8, 0, 1.25],
+      [-1.3, 4.2, 0.7, 0.95],
+      [1.2, 4.3, -0.6, 0.98],
+    ];
+    kcOffsets.forEach(([ox, oy, oz, scale], ci) => {
+      dummy.position.set(kx + ox, oy, kz + oz);
+      dummy.rotation.set(ci * 0.35, ki * 0.8 + ci * 1.6, 0);
+      dummy.scale.set(scale * 1.35, scale * 0.72, scale * 1.35); // Broad spreading umbrella crown
+      dummy.updateMatrix();
+      kcCanopyInst.setMatrixAt(ki * kcCanopyPerTree + ci, dummy.matrix);
+    });
+  });
+  kcTrunkInst.instanceMatrix.needsUpdate = true;
+  kcCanopyInst.instanceMatrix.needsUpdate = true;
+  kcTrunkInst.computeBoundingSphere();
+  kcCanopyInst.computeBoundingSphere();
+  if (castShadow) {
+    kcTrunkInst.castShadow = true;
+    kcCanopyInst.castShadow = true;
+  }
+  root.add(kcTrunkInst, kcCanopyInst);
+  disposables.push(kcTrunkGeo, kcTrunkMat, kcCanopyGeo, kcCanopyMat);
 
   // 7. Instanced Dhaka Sodium Streetlamps + Additive Glow Halos & Ground Light Pools (zero extra PointLights!)
   const lampCoords: Array<[number, number, number]> = [];
@@ -1499,6 +1581,61 @@ export function buildDhakaWorld(
   root.add(rainPoints);
   disposables.push(rainGeo, rainMat);
 
+  // 10b. Directional Monsoon Rain Streaks (LineSegments for realistic motion-blurred falling rain)
+  const streakCount = 1200;
+  const streakPositions = new Float32Array(streakCount * 6);
+  for (let i = 0; i < streakCount; i++) {
+    const rx = (Math.random() - 0.5) * 76;
+    const ry = Math.random() * 28;
+    const rz = (Math.random() - 0.5) * 76;
+    const len = 0.85 + Math.random() * 0.65;
+    // Streak start (top tail)
+    streakPositions[i * 6] = rx;
+    streakPositions[i * 6 + 1] = ry;
+    streakPositions[i * 6 + 2] = rz;
+    // Streak end (falling leading tip)
+    streakPositions[i * 6 + 3] = rx + 0.12;
+    streakPositions[i * 6 + 4] = ry - len;
+    streakPositions[i * 6 + 5] = rz + 0.04;
+  }
+  const streakGeo = new THREE.BufferGeometry();
+  streakGeo.setAttribute('position', new THREE.BufferAttribute(streakPositions, 3));
+  const streakMat = new THREE.LineBasicMaterial({
+    color: 0xdae8f5,
+    transparent: true,
+    opacity: 0.46,
+    depthWrite: false,
+  });
+  const rainStreaks = new THREE.LineSegments(streakGeo, streakMat);
+  rainStreaks.visible = false;
+  rainStreaks.frustumCulled = false;
+  root.add(rainStreaks);
+  disposables.push(streakGeo, streakMat);
+
+  // 10c. Pooled Ground Rain Splash Ripples (additive concentric droplet impact circles)
+  const splashCount = 96;
+  const splashGeo = new THREE.PlaneGeometry(0.75, 0.75);
+  splashGeo.rotateX(-Math.PI / 2);
+  const splashMat = new THREE.MeshBasicMaterial({
+    map: textures.rainSplashMap,
+    transparent: true,
+    opacity: 0.0,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const rainSplashInst = new THREE.InstancedMesh(splashGeo, splashMat, splashCount);
+  rainSplashInst.visible = false;
+  rainSplashInst.frustumCulled = false;
+  for (let i = 0; i < splashCount; i++) {
+    dummy.position.set(0, -50, 0);
+    dummy.scale.set(0, 0, 0);
+    dummy.updateMatrix();
+    rainSplashInst.setMatrixAt(i, dummy.matrix);
+  }
+  rainSplashInst.instanceMatrix.needsUpdate = true;
+  root.add(rainSplashInst);
+  disposables.push(splashGeo, splashMat);
+
   return {
     root,
     skyDome,
@@ -1521,7 +1658,13 @@ export function buildDhakaWorld(
     rainPoints,
     rainPositions,
     rainMaxCount: rainCount,
+    canopyInst,
+    palmFrondInst,
+    kcCanopyInst,
+    rainStreaks,
+    rainSplashInst,
     cameraOccluders,
+    chunkManager,
     disposables,
   };
 }

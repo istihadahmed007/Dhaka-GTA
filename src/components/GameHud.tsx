@@ -9,6 +9,9 @@ interface GameHudProps {
   onOpenWardrobe: () => void;
   onSelectWeapon: (w: WeaponId) => void;
   onToggleFare: () => void;
+  onUseItem?: (itemId: string) => void;
+  onOpenMultiplayerLobby?: () => void;
+  onSendChatMessage?: (text: string) => void;
 }
 
 const WEAPON_ORDER: WeaponId[] = ['fists', 'pistol', 'smg', 'shotgun'];
@@ -20,9 +23,28 @@ export const GameHud: React.FC<GameHudProps> = ({
   onOpenWardrobe,
   onSelectWeapon,
   onToggleFare,
+  onUseItem,
+  onOpenMultiplayerLobby,
+  onSendChatMessage,
 }) => {
   // Delayed trailing damage ghost bar for player HP
   const [ghostHp, setGhostHp] = useState(hud.hp);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatText, setChatText] = useState('');
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'KeyT' && !chatOpen && hud.multiplayerActive) {
+        const activeTag = document.activeElement?.tagName.toLowerCase();
+        if (activeTag !== 'input' && activeTag !== 'textarea') {
+          e.preventDefault();
+          setChatOpen(true);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [chatOpen, hud.multiplayerActive]);
 
   useEffect(() => {
     if (hud.hp >= ghostHp) {
@@ -63,6 +85,24 @@ export const GameHud: React.FC<GameHudProps> = ({
 
       {/* TOP-LEFT: Compact Active Mission Objective & Toast */}
       <div className="fixed top-4 left-4 max-w-[330px] flex flex-col gap-2">
+        {hud.activeSideMission && (
+          <div className="bg-[#181326]/95 border-l-4 border-[#a855f7] px-3.5 py-2 shadow-[0_6px_18px_rgba(0,0,0,0.6)]">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="font-display text-sm font-bold uppercase tracking-wider text-[#d8b4fe]">
+                {hud.activeSideMission.title}
+              </span>
+              <span className="font-bangla text-[11px] text-[#e9d5ff]/80">{hud.activeSideMission.banglaTitle}</span>
+            </div>
+            <p className="text-xs text-[#f5f2eb] mt-0.5 leading-snug">{hud.activeSideMission.objective}</p>
+            <div className="mt-1 flex items-center justify-between text-[11px] font-bold text-[#c084fc] tabular-nums">
+              <span>Reward: ৳{hud.activeSideMission.rewardMoney}</span>
+              {hud.activeSideMission.timer && (
+                <span className="text-[#f87171]">{Math.ceil(hud.activeSideMission.timer)}s</span>
+              )}
+            </div>
+          </div>
+        )}
+
         {hud.missionTitle && (
           <div className="bg-[#10151c]/90 border-l-4 border-[#e6a135] px-3.5 py-2 shadow-[0_6px_18px_rgba(0,0,0,0.6)]">
             <div className="flex items-baseline justify-between gap-2">
@@ -121,6 +161,31 @@ export const GameHud: React.FC<GameHudProps> = ({
               </div>
             )}
           </div>
+
+          <button
+            type="button"
+            tabIndex={-1}
+            onClick={(e) => {
+              e.currentTarget.blur();
+              onOpenMultiplayerLobby?.();
+            }}
+            aria-label="Open Multiplayer Lobby"
+            title="Multiplayer Lobby [L]"
+            className={`pointer-events-auto px-2 h-9 flex items-center gap-1.5 bg-[#10151c]/92 border transition-colors cursor-pointer ${
+              hud.multiplayerActive
+                ? 'border-[#34d399] text-[#34d399] hover:bg-[#0f7a53]/20'
+                : 'border-[#e6a135]/40 hover:border-[#f5d07a] text-[#f5f2eb]'
+            }`}
+          >
+            <span
+              className={`w-2 h-2 rounded-full ${
+                hud.multiplayerActive ? 'bg-[#34d399] animate-pulse' : 'bg-[#94a3b8]'
+              }`}
+            />
+            <span className="font-display text-xs font-bold uppercase tracking-wider">
+              {hud.multiplayerActive ? `${hud.multiplayerPing}ms (${hud.multiplayerPlayerCount}P)` : 'ONLINE'}
+            </span>
+          </button>
 
           <button
             type="button"
@@ -303,6 +368,29 @@ export const GameHud: React.FC<GameHudProps> = ({
               <div className="h-full bg-[#e6a135] transition-all duration-100" style={{ width: `${staminaPct}%` }} />
             </div>
           </div>
+
+          {/* Quick Inventory Tray */}
+          {hud.inventory && hud.inventory.length > 0 && hud.modal === 'none' && (
+            <div className="flex flex-wrap items-center gap-1 mt-1 pt-1 border-t border-white/10 pointer-events-auto">
+              {hud.inventory.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  tabIndex={-1}
+                  onClick={(e) => {
+                    e.currentTarget.blur();
+                    onUseItem?.(item.id);
+                  }}
+                  title={`${item.name} (${item.banglaName}) - ${item.description}`}
+                  className="px-1.5 py-0.5 bg-[#10151c]/90 hover:bg-[#1e293b] border border-white/15 text-[9px] font-semibold text-[#f5f2eb] flex items-center gap-1 cursor-pointer transition-colors"
+                >
+                  <span>{item.kind === 'food' ? '☕' : item.kind === 'fuel' ? '⛽' : '🩹'}</span>
+                  <span>{item.banglaName}</span>
+                  <span className="px-1 bg-white/10 rounded text-[9px] text-[#34d399] font-bold">{item.count}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -328,6 +416,80 @@ export const GameHud: React.FC<GameHudProps> = ({
         )}
       </div>
 
+      {/* TOP-RIGHT MULTIPLAYER KILLFEED */}
+      {hud.multiplayerKillfeed && hud.multiplayerKillfeed.length > 0 && (
+        <div className="fixed top-56 right-4 flex flex-col gap-1.5 pointer-events-none z-20 max-w-[280px]">
+          {hud.multiplayerKillfeed.map((k) => (
+            <div
+              key={k.id}
+              className="px-2.5 py-1 bg-[#10151c]/90 border-l-4 border-[#ef4444] text-[#f8fafc] text-xs font-bold shadow-[0_4px_12px_rgba(0,0,0,0.7)]"
+            >
+              ⚔ {k.text}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* MULTIPLAYER CHAT TRAY */}
+      {hud.multiplayerActive && (
+        <div className="fixed bottom-44 left-4 max-w-[340px] flex flex-col gap-1 z-20 pointer-events-auto">
+          {hud.multiplayerChat && hud.multiplayerChat.length > 0 && (
+            <div className="max-h-36 overflow-y-auto flex flex-col gap-1 bg-[#0b0e14]/85 border border-white/10 p-2 text-xs">
+              {hud.multiplayerChat.slice(-6).map((msg) => (
+                <div key={msg.id} className="leading-snug">
+                  <span className={`font-bold ${msg.isSystem ? 'text-[#38bdf8]' : 'text-[#f5d07a]'}`}>
+                    {msg.sender}:
+                  </span>{' '}
+                  <span className="text-[#f8fafc]">{msg.text}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {chatOpen ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (chatText.trim() && onSendChatMessage) {
+                  onSendChatMessage(chatText.trim());
+                  setChatText('');
+                }
+                setChatOpen(false);
+              }}
+              className="flex gap-1"
+            >
+              <input
+                type="text"
+                value={chatText}
+                onChange={(e) => setChatText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    setChatOpen(false);
+                  }
+                }}
+                autoFocus
+                placeholder="Type in-game chat..."
+                className="flex-1 bg-[#111720] border border-[#e6a135] px-2 py-1 text-xs text-[#f8f5ee] focus:outline-none"
+              />
+              <button
+                type="submit"
+                className="px-2 py-1 bg-[#0f7a53] text-white text-xs font-bold uppercase cursor-pointer"
+              >
+                Send
+              </button>
+            </form>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setChatOpen(true)}
+              className="self-start px-2 py-0.5 bg-[#10151c]/80 hover:bg-[#1b2432] border border-white/10 text-[10px] text-[#94a3b8] cursor-pointer"
+            >
+              Press [T] to Chat
+            </button>
+          )}
+        </div>
+      )}
+
       {/* BOTTOM-RIGHT: Vehicle Speedometer & Integrity (only when driving) */}
       {hud.inVehicle && (
         <div
@@ -349,6 +511,24 @@ export const GameHud: React.FC<GameHudProps> = ({
               className={`h-full ${hud.vehicleHp < hud.vehicleMaxHp * 0.35 ? 'bg-[#ef4444]' : 'bg-[#10b981]'}`}
               style={{ width: `${Math.max(0, Math.min(100, (hud.vehicleHp / hud.vehicleMaxHp) * 100))}%` }}
             />
+          </div>
+
+          {/* Fuel Gauge Bar */}
+          <div className="mt-1.5">
+            <div className="flex items-center justify-between text-[9px] font-bold uppercase tracking-wider mb-0.5">
+              <span className={hud.isLowFuel ? 'text-[#ef4444] animate-pulse font-extrabold' : 'text-[#38bdf8]'}>
+                {hud.isLowFuel ? '⚠️ LOW FUEL' : 'FUEL'}
+              </span>
+              <span className="text-[#cbd5e1] tabular-nums">{hud.fuel}%</span>
+            </div>
+            <div className="h-1.5 bg-[#090c10] overflow-hidden border border-white/10">
+              <div
+                className={`h-full transition-all duration-150 ${
+                  hud.fuel < 20 ? 'bg-[#ef4444]' : hud.fuel < 45 ? 'bg-[#f59e0b]' : 'bg-[#38bdf8]'
+                }`}
+                style={{ width: `${Math.max(0, Math.min(100, hud.fuelRatio * 100))}%` }}
+              />
+            </div>
           </div>
           <div className="mt-2 flex items-center justify-between gap-2 text-[10px] uppercase tracking-wider text-[#94a3b8]">
             <span>[H] Horn · [F] Exit</span>
