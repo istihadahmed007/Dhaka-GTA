@@ -9,6 +9,8 @@ interface MinimapProps {
   blips: MinimapBlip[];
   wantedLevel: number;
   inVehicle?: boolean;
+  policeSearchRadius?: { x: number; z: number; radius: number; active: boolean } | null;
+  companion?: { x?: number; z?: number; name?: string; state?: string } | null;
 }
 
 export const Minimap: React.FC<MinimapProps> = ({
@@ -18,6 +20,8 @@ export const Minimap: React.FC<MinimapProps> = ({
   blips,
   wantedLevel,
   inVehicle = false,
+  policeSearchRadius,
+  companion,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -179,6 +183,36 @@ export const Minimap: React.FC<MinimapProps> = ({
       }
     }
 
+    // GTA VI Flashing Police Search Radius Perimeter
+    if (policeSearchRadius && policeSearchRadius.active) {
+      const [px, py] = toMap(policeSearchRadius.x, policeSearchRadius.z);
+      const pr = Math.max(10, policeSearchRadius.radius * scale);
+      ctx.save();
+      ctx.fillStyle = 'rgba(239, 68, 68, 0.22)';
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = 2.0;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.arc(px, py, pr, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // GTA VI Tag-Team Companion Blip
+    if (companion && companion.x !== undefined && companion.z !== undefined) {
+      const [cx, cy] = toMap(companion.x, companion.z);
+      ctx.save();
+      ctx.fillStyle = '#38bdf8';
+      ctx.strokeStyle = '#0284c7';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 4.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+
     // Player directional triangle at center (heading PI = North = up on canvas)
     ctx.save();
     ctx.translate(half, half);
@@ -215,7 +249,7 @@ export const Minimap: React.FC<MinimapProps> = ({
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('N', half, 10.5);
-  }, [playerX, playerZ, playerHeading, blips, wantedLevel, inVehicle]);
+  }, [playerX, playerZ, playerHeading, blips, wantedLevel, inVehicle, policeSearchRadius, companion]);
 
   return (
     <canvas

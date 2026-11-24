@@ -168,7 +168,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
 
       {/* Bottom safe margin: single flat borderless control-hint line */}
       <div className="relative z-10 text-xs sm:text-sm text-[#e5e0d5]/90 tracking-wide hud-text-stroke">
-        WASD Move · Space Jump · F Drive Vehicle · Left Click / J Attack · G Interact · C Wardrobe · T Time · V Monsoon · Esc Pause
+        WASD Move · Space Jump · F Drive Vehicle · [Tab] Weapon Wheel · [P] Smartphone · [C] Switch Hero · [Y] Tag-Team Partner · [H] Rob Shop · Esc Pause
       </div>
     </div>
   );

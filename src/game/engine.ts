@@ -30,6 +30,10 @@ import {
   WeaponId,
   WEAPON_SPECS,
   WeatherMode,
+  CompanionState,
+  StoreRobberyState,
+  PoliceSearchRadiusState,
+  PhoneContact,
 } from './types';
 import {
   addWantedHeat,
@@ -298,6 +302,15 @@ export class DhakaGameEngine {
   private specialAbilityTimer = 0;
   private specialAbilityCooldown = 0;
   private specialAbilityActive = false;
+
+  // GTA VI Core Systems: Weapon Wheel, Smartphone, Co-Op Companion & Robberies
+  private weaponWheelOpen = false;
+  private smartphoneOpen = false;
+  private activeCompanion: CompanionState | null = null;
+  private companionBanterTimer = 14.0;
+  private companionAttackTimer = 0;
+  private activeRobbery: StoreRobberyState | null = null;
+  private policeSearchRadius: PoliceSearchRadiusState | null = null;
 
   // Input State (separated held vs edge-triggered justPressed)
   private keysHeld = new Set<string>();
@@ -1705,10 +1718,28 @@ export class DhakaGameEngine {
       return;
     }
 
-    if (code === 'Escape' || code === 'KeyP') {
+    if (code === 'Escape') {
       if (this.phase === 'playing' || this.phase === 'paused') {
         e.preventDefault();
         this.togglePause();
+        return;
+      }
+    }
+
+    // GTA VI Smartphone [P]
+    if (code === 'KeyP') {
+      if (this.phase === 'playing' && this.modal === 'none') {
+        e.preventDefault();
+        this.toggleSmartphone();
+        return;
+      }
+    }
+
+    // GTA VI Radial Weapon Wheel [Tab] (holds bullet-time slowdown)
+    if (code === 'Tab') {
+      if (this.phase === 'playing' && this.modal === 'none') {
+        e.preventDefault();
+        this.toggleWeaponWheel(true);
         return;
       }
     }
@@ -1732,6 +1763,9 @@ export class DhakaGameEngine {
 
   private onKeyUp = (e: KeyboardEvent) => {
     this.keysHeld.delete(e.code);
+    if (e.code === 'Tab' && this.weaponWheelOpen) {
+      this.toggleWeaponWheel(false);
+    }
     // Variable jump height cut when releasing jump early
     if (e.code === 'Space' && !this.player.grounded && this.player.vy > 2.2) {
       this.player.vy *= 0.48;
@@ -1907,8 +1941,9 @@ export class DhakaGameEngine {
 
     // Hitstop pauses gameplay physics briefly on heavy impact while camera shake renders
     // Focus Reflex (Maya) slows world simulation time to 0.45x while camera remains fluid
+    // GTA VI Radial Weapon Wheel slows world simulation time to 0.12x (bullet-time)
     const isFocusReflex = this.specialAbilityActive && this.activeProtagonistId === 'maya';
-    const timeScale = isFocusReflex ? 0.45 : 1.0;
+    const timeScale = this.weaponWheelOpen ? 0.12 : (isFocusReflex ? 0.45 : 1.0);
     let simDt = dt * timeScale;
     if (this.hitstopTimer > 0) {
       this.hitstopTimer = Math.max(0, this.hitstopTimer - dt);
@@ -1955,6 +1990,9 @@ export class DhakaGameEngine {
       this.updateNpcs(simDt);
       this.updatePoliceEscalation(simDt);
       this.updateMissionsAndFare(simDt);
+      this.updateCompanion(simDt);
+      this.updateRobbery(simDt);
+      this.updatePoliceSearchRadius(simDt);
 
       if (this.dialogue) {
         this.dialogue.timer -= simDt;
@@ -2087,6 +2125,16 @@ export class DhakaGameEngine {
       this.switchProtagonist();
     }
 
+    // GTA VI Smartphone [P]
+    if (this.keysJustPressed.has('KeyP')) {
+      this.toggleSmartphone();
+    }
+
+    // GTA VI Companion Tag-Team Rally [Y]
+    if (this.keysJustPressed.has('KeyY')) {
+      this.toggleCompanion();
+    }
+
     // Toggle Camera View Mode [V] (First Person Cockpit / 3rd Close / 3rd Chase / Cinematic)
     if (this.keysJustPressed.has('KeyV')) {
       this.cycleCameraView();
@@ -2122,18 +2170,22 @@ export class DhakaGameEngine {
       this.startReload();
     }
 
-    // Horn [H]
-    if (this.keysJustPressed.has('KeyH') && this.player.vehicleId) {
-      const veh = this.vehicles.find((v) => v.id === this.player.vehicleId);
-      if (veh) {
-        this.audio.playHorn(veh.kind);
-        // Nearby pedestrians scatter slightly when honked at
-        this.npcs.forEach((n) => {
-          if (n.role === 'civilian' && Math.hypot(n.x - veh.x, n.z - veh.z) < 10) {
-            n.state = 'flee';
-            n.stateTimer = 2.5;
-          }
-        });
+    // Horn [H] in Vehicle or Robbery Step [H] on foot
+    if (this.keysJustPressed.has('KeyH')) {
+      if (this.player.vehicleId) {
+        const veh = this.vehicles.find((v) => v.id === this.player.vehicleId);
+        if (veh) {
+          this.audio.playHorn(veh.kind);
+          // Nearby pedestrians scatter slightly when honked at
+          this.npcs.forEach((n) => {
+            if (n.role === 'civilian' && Math.hypot(n.x - veh.x, n.z - veh.z) < 10) {
+              n.state = 'flee';
+              n.stateTimer = 2.5;
+            }
+          });
+        }
+      } else {
+        this.triggerStoreRobberyStep();
       }
     }
 
@@ -3898,6 +3950,340 @@ export class DhakaGameEngine {
     this.emitHud();
   }
 
+  // === GTA VI CORE MECHANICS (WEAPON WHEEL, SMARTPHONE, COMPANION CO-OP & STORE ROBBERIES) ===
+
+  public toggleWeaponWheel(open?: boolean): void {
+    this.weaponWheelOpen = open !== undefined ? open : !this.weaponWheelOpen;
+    this.emitHud();
+  }
+
+  public toggleSmartphone(open?: boolean): void {
+    this.smartphoneOpen = open !== undefined ? open : !this.smartphoneOpen;
+    this.emitHud();
+  }
+
+  public captureSnapshot(): void {
+    this.audio.playClick();
+    this.showToast('📸 Photo Captured & Saved to DhakaOS Gallery!');
+  }
+
+  public handleDepositMoney(amt: number): void {
+    if (this.player.money >= amt) {
+      this.player.money -= amt;
+      this.showToast(`৳${amt.toLocaleString()} deposited into bKash Vault!`);
+      this.emitHud();
+    }
+  }
+
+  public toggleCompanion(): void {
+    if (this.activeCompanion) {
+      this.activeCompanion = null;
+      if (this.secondaryProtagonistRig) {
+        this.secondaryProtagonistRig.group.visible = false;
+      }
+      this.showToast('Partner backup dismissed');
+      this.emitHud();
+      return;
+    }
+
+    const partnerId: ProtagonistId = this.activeProtagonistId === 'tariq' ? 'maya' : 'tariq';
+    const partnerProf = PROTAGONIST_PROFILES[partnerId];
+
+    this.activeCompanion = {
+      id: partnerId,
+      name: partnerProf.name,
+      banglaName: partnerProf.banglaName,
+      hp: partnerProf.attributes.maxHp,
+      maxHp: partnerProf.attributes.maxHp,
+      state: this.player.vehicleId ? 'passenger' : 'following',
+      weapon: partnerProf.preferredWeapon,
+    };
+
+    if (this.secondaryProtagonistRig) {
+      this.secondaryProtagonistRig.group.visible = true;
+      this.secondaryProtagonistRig.group.position.set(
+        this.player.x + 2,
+        this.player.y,
+        this.player.z + 2
+      );
+      setHumanoidWeaponMesh(this.secondaryProtagonistRig, partnerProf.preferredWeapon);
+      setHumanoidOutfit(this.secondaryProtagonistRig, partnerProf.defaultOutfit);
+    }
+
+    this.showToast(`🔥 ${partnerProf.name} (${partnerProf.banglaName}) joined as Tag-Team Partner!`);
+    this.triggerDialogue(
+      partnerProf.name,
+      partnerId === 'maya' ? 'তারেক, আমি কভার দিচ্ছি! চলো বের হই!' : 'মায়া, আমি সাথে আছি! ড্রিফট শুরু করো!',
+      partnerId === 'maya' ? "Tariq, I've got your back! Let's roll!" : "Maya, I'm riding shotgun! Let's hit the gas!",
+      5.5
+    );
+    this.emitHud();
+  }
+
+  public handleCallContact(contact: PhoneContact): void {
+    if (this.player.money < contact.cost) {
+      this.showToast(`Need ৳${contact.cost} to call ${contact.name}`);
+      return;
+    }
+    this.player.money -= contact.cost;
+
+    if (contact.serviceType === 'vehicle_drop') {
+      const dropX = this.player.x + Math.sin(this.player.heading) * 6;
+      const dropZ = this.player.z + Math.cos(this.player.heading) * 6;
+      const vehSpawn: VehicleState = {
+        id: `drop_sedan_${Date.now()}`,
+        kind: 'sedan',
+        x: dropX,
+        y: 0,
+        z: dropZ,
+        heading: this.player.heading,
+        speed: 0,
+        steerAngle: 0,
+        hp: 200,
+        maxHp: 200,
+        color: 0x0f172a,
+        driver: 'none',
+        routeIdx: 0,
+        waypointIdx: 0,
+        honkTimer: 0,
+        sirenOn: false,
+        damagedSmoke: false,
+        fuel: 100,
+        maxFuel: 100,
+        fuelType: 'petrol',
+        customization: {
+          engineStage: 3,
+          brakesStage: 2,
+          hasTurbo: true,
+          hasSpoiler: true,
+          tintLevel: 2,
+          plateJammer: true,
+        },
+      };
+      this.vehicles.push(vehSpawn);
+      this.spawnBurst(dropX, 0.5, dropZ, 0x38bdf8, 8, 2.5);
+      this.showToast('🚗 Shofi Bhai delivered a tuned Gulshan GT Sedan!');
+    } else if (contact.serviceType === 'clear_heat') {
+      this.player.wantedLevel = 0;
+      this.player.wantedHeat = 0;
+      this.player.wantedCooldown = 0;
+      this.policeSearchRadius = null;
+      this.showToast('👮 Inspector Rehan wiped your DMP wanted record!');
+    } else if (contact.serviceType === 'weapons') {
+      if (!this.player.unlockedWeapons.includes('shotgun')) {
+        this.player.unlockedWeapons.push('shotgun');
+      }
+      this.player.weapon = 'shotgun';
+      this.player.ammo.shotgun = (this.player.ammo.shotgun ?? 0) + 36;
+      this.player.armor = this.player.maxArmor;
+      this.showToast('📦 Master Kabir delivered 12G Shotgun & Heavy Armor!');
+    } else if (contact.serviceType === 'companion') {
+      this.toggleCompanion();
+    }
+    this.emitHud();
+  }
+
+  private triggerStoreRobberyStep(): void {
+    if (this.player.vehicleId || this.player.weapon === 'fists') return;
+    if (this.activeRobbery) {
+      this.activeRobbery.intimidation = Math.min(100, this.activeRobbery.intimidation + 30);
+      this.audio.playWeapon('pistol');
+      this.showToast('Intimidation boosted! Cashier bagging faster!');
+      return;
+    }
+    const nearShop = POIS.find((p) => p.kind === 'shop' && Math.hypot(p.x - this.player.x, p.z - this.player.z) <= p.radius + 3.0);
+    if (!nearShop) return;
+
+    this.activeRobbery = {
+      storeId: nearShop.id,
+      storeName: nearShop.name,
+      storeBangla: nearShop.banglaName,
+      district: getDistrictAt(nearShop.x, nearShop.z),
+      x: nearShop.x,
+      z: nearShop.z,
+      intimidation: 55,
+      cashBagged: 0,
+      targetCash: 6000 + Math.floor(Math.random() * 5000),
+      state: 'intimidation',
+      timer: 0,
+    };
+    this.audio.playImpact(true);
+    this.showToast(`🚨 Robbery Started at ${nearShop.name}! Keep weapon drawn!`);
+    this.triggerDialogue('Shopkeeper', 'ভাই সব নিয়া যান, গুলি কইরেন না!', 'Take everything, please don’t shoot!');
+    this.emitHud();
+  }
+
+  private updateRobbery(dt: number): void {
+    if (!this.activeRobbery) return;
+    const rob = this.activeRobbery;
+    const dist = Math.hypot(this.player.x - rob.x, this.player.z - rob.z);
+    if (dist > 15.0) {
+      this.showToast('Robbery Abandoned: Moved too far from the cash counter.');
+      this.activeRobbery = null;
+      this.emitHud();
+      return;
+    }
+
+    rob.timer += dt;
+    // Decaying intimidation if player holsters weapon
+    if (this.player.weapon === 'fists') {
+      rob.intimidation = Math.max(0, rob.intimidation - dt * 25);
+    } else {
+      rob.intimidation = Math.min(100, rob.intimidation + dt * 8);
+    }
+
+    if (rob.intimidation < 10) {
+      this.showToast('Clerk panicked and hit silent alarm! Robbery failed!');
+      this.player.wantedLevel = Math.max(this.player.wantedLevel, 2);
+      this.activeRobbery = null;
+      this.emitHud();
+      return;
+    }
+
+    // Cashier bags cash
+    const baggingRate = (rob.intimidation / 100) * 1200;
+    rob.cashBagged = Math.min(rob.targetCash, rob.cashBagged + dt * baggingRate);
+
+    if (rob.cashBagged >= rob.targetCash) {
+      const reward = Math.round(rob.targetCash);
+      this.player.money += reward;
+      this.player.wantedLevel = Math.max(this.player.wantedLevel, 2);
+      this.audio.playChime(true);
+      this.showToast(`💰 Robbery Successful! Stashed ৳${reward.toLocaleString()}! Police dispatched!`);
+      this.policeSearchRadius = {
+        x: rob.x,
+        z: rob.z,
+        radius: 45.0,
+        active: true,
+        searchTimer: 25.0,
+      };
+      this.activeRobbery = null;
+      this.emitHud();
+    }
+  }
+
+  private updateCompanion(dt: number): void {
+    if (!this.activeCompanion || !this.secondaryProtagonistRig) return;
+    const comp = this.activeCompanion;
+    const rig = this.secondaryProtagonistRig;
+
+    this.companionBanterTimer -= dt;
+    if (this.companionBanterTimer <= 0) {
+      this.companionBanterTimer = 22.0 + Math.random() * 10.0;
+      this.triggerCompanionBanter();
+    }
+
+    // If player is in a vehicle
+    if (this.player.vehicleId) {
+      const veh = this.vehicles.find((v) => v.id === this.player.vehicleId);
+      if (veh) {
+        comp.state = 'passenger';
+        const rightX = Math.cos(veh.heading);
+        const rightZ = -Math.sin(veh.heading);
+        const fwdX = -Math.sin(veh.heading);
+        const fwdZ = -Math.cos(veh.heading);
+
+        const pX = veh.x + rightX * 0.52 - fwdX * 0.15;
+        const pZ = veh.z + rightZ * 0.52 - fwdZ * 0.15;
+        const pY = veh.y + 0.15;
+
+        rig.group.position.set(pX, pY, pZ);
+        rig.group.rotation.y = veh.heading;
+        rig.group.visible = true;
+
+        // Drive-by auto cover fire against pursuers
+        this.companionAttackTimer -= dt;
+        if (this.companionAttackTimer <= 0) {
+          const target = this.npcs.find(
+            (n) => (n.role === 'police' || n.role === 'syndicate') && n.hp > 0 && Math.hypot(n.x - veh.x, n.z - veh.z) < 28
+          );
+          if (target) {
+            this.companionAttackTimer = 0.85;
+            target.hp -= 20;
+            this.spawnBurst(target.x, 1.2, target.z, 0xff3333, 3, 1.5);
+            this.audio.playWeapon('smg');
+            if (target.hp <= 0) {
+              target.state = 'ko';
+              this.showToast(`${comp.name} took out a hostile!`);
+            }
+          }
+        }
+      }
+    } else {
+      // On foot: companion follows player smoothly
+      comp.state = 'following';
+      rig.group.visible = true;
+
+      const targetFollowX = this.player.x - Math.sin(this.player.heading) * 1.8 + Math.cos(this.player.heading) * 1.2;
+      const targetFollowZ = this.player.z - Math.cos(this.player.heading) * 1.8 - Math.sin(this.player.heading) * 1.2;
+
+      const dx = targetFollowX - rig.group.position.x;
+      const dz = targetFollowZ - rig.group.position.z;
+      const dist = Math.hypot(dx, dz);
+
+      if (dist > 0.4) {
+        const moveSpd = Math.min(8.5, dist * 3.5);
+        rig.group.position.x += (dx / dist) * moveSpd * dt;
+        rig.group.position.z += (dz / dist) * moveSpd * dt;
+        rig.group.position.y = this.player.y;
+        rig.group.rotation.y = Math.atan2(-dx, -dz);
+        rig.animator.update(dt, { speed: moveSpd, isGrounded: true, weapon: comp.weapon });
+      } else {
+        rig.animator.update(dt, { speed: 0, isGrounded: true, weapon: comp.weapon });
+      }
+
+      // Foot combat cover fire
+      this.companionAttackTimer -= dt;
+      if (this.companionAttackTimer <= 0) {
+        const target = this.npcs.find(
+          (n) => (n.role === 'police' || n.role === 'syndicate') && n.hp > 0 && Math.hypot(n.x - this.player.x, n.z - this.player.z) < 20
+        );
+        if (target) {
+          this.companionAttackTimer = 0.9;
+          target.hp -= 18;
+          this.spawnBurst(target.x, 1.2, target.z, 0xff3333, 3, 1.5);
+          this.audio.playWeapon('pistol');
+          if (target.hp <= 0) {
+            target.state = 'ko';
+            this.showToast(`${comp.name} eliminated an attacker!`);
+          }
+        }
+      }
+    }
+  }
+
+  private triggerCompanionBanter(): void {
+    if (!this.activeCompanion) return;
+    const isTariqActive = this.activeProtagonistId === 'tariq';
+    const lines = isTariqActive
+      ? [
+          { speaker: 'Maya', bangla: 'তারেক, পেছনে খেয়াল রাখো! পুলিশ কিন্তু পিছু ছাড়বে না!', english: 'Tariq, watch your six! Police won’t let up easily!' },
+          { speaker: 'Tariq', bangla: 'চকবাজারের গলিতে আমাদের ধরতে পারবে না, ভরসা রাখো!', english: 'They can’t catch us in these Old Dhaka alleys, trust me!' },
+          { speaker: 'Maya', bangla: 'আমার গান রেডি আছে। তুমি শুধু এক্সিলারেটর চেপে রাখো!', english: 'My weapon is locked and loaded. Just keep your foot on the gas!' },
+          { speaker: 'Tariq', bangla: 'ধোলাইখালের আসল ড্রিফট এখনও দেখোই নাই!', english: 'You haven’t even seen real Dholaikhal drifting yet!' },
+        ]
+      : [
+          { speaker: 'Tariq', bangla: 'মায়া, ফুল স্পিডে চলো! সিন্ডিকেটের খবর আমরা আজই বের করবো!', english: 'Maya, floor it! We’re busting this syndicate network today!' },
+          { speaker: 'Maya', bangla: 'তাদের সার্ভার ড্রাইভ আমার কাছে। আমাদের শুধু সদরে পৌঁছাতে হবে।', english: 'I have their server drive. We just need to make it to Sadarghat.' },
+          { speaker: 'Tariq', bangla: 'কোন চিন্তা নাই, আমি সামনে ক্লিয়ার করছি!', english: 'No worries, clearing the road ahead!' },
+        ];
+    const pick = lines[Math.floor(Math.random() * lines.length)];
+    this.triggerDialogue(pick.speaker, pick.bangla, pick.english, 5.5);
+  }
+
+  private updatePoliceSearchRadius(dt: number): void {
+    if (!this.policeSearchRadius || !this.policeSearchRadius.active) return;
+    this.policeSearchRadius.searchTimer -= dt;
+    if (this.policeSearchRadius.searchTimer <= 0) {
+      this.policeSearchRadius.active = false;
+      this.policeSearchRadius = null;
+      if (this.player.wantedLevel > 0) {
+        this.player.wantedLevel = Math.max(0, this.player.wantedLevel - 1);
+        this.showToast('Police lost your trail! Wanted heat cooling down.');
+      }
+    }
+  }
+
   // === POOLED PARTICLE BURSTS ===
 
   private spawnBurst(x: number, y: number, z: number, colorHex: number, count: number, speed: number): void {
@@ -3960,10 +4346,21 @@ export class DhakaGameEngine {
   // === HUD SNAPSHOT ===
 
   private computeInteractPrompt(): { prompt: string | null; key: string | null } {
+    if (this.activeRobbery) {
+      return {
+        prompt: `Robbing ${this.activeRobbery.storeName} — Keep Weapon Drawn [H] (৳${Math.round(this.activeRobbery.cashBagged).toLocaleString()} / ৳${this.activeRobbery.targetCash.toLocaleString()})`,
+        key: 'H',
+      };
+    }
     for (const poi of POIS) {
       if (Math.hypot(poi.x - this.player.x, poi.z - this.player.z) <= poi.radius + 2.0) {
         if (poi.kind === 'garage') return { prompt: `Open ${poi.name}`, key: 'G' };
-        if (poi.kind === 'shop') return { prompt: `Enter ${poi.name}`, key: 'G' };
+        if (poi.kind === 'shop') {
+          if (this.player.weapon !== 'fists' && !this.player.vehicleId) {
+            return { prompt: `Hold [H] to Rob ${poi.name}`, key: 'H' };
+          }
+          return { prompt: `Enter ${poi.name}`, key: 'G' };
+        }
         if (poi.kind === 'safehouse') {
           const safeId = (poi.safehouseId ?? poi.id) as SafehouseId;
           const spec = SAFEHOUSE_SPECS.find((s) => s.id === safeId);
@@ -4132,6 +4529,17 @@ export class DhakaGameEngine {
       playerZ: this.player.z,
       playerHeading: this.player.heading,
       blips,
+      weaponWheelOpen: this.weaponWheelOpen,
+      smartphoneOpen: this.smartphoneOpen,
+      activeCompanion: this.activeCompanion
+        ? {
+            ...this.activeCompanion,
+            x: this.secondaryProtagonistRig ? this.secondaryProtagonistRig.group.position.x : undefined,
+            z: this.secondaryProtagonistRig ? this.secondaryProtagonistRig.group.position.z : undefined,
+          }
+        : null,
+      activeRobbery: this.activeRobbery ? { ...this.activeRobbery } : null,
+      policeSearchRadius: this.policeSearchRadius ? { ...this.policeSearchRadius } : null,
       stats: {
         kills: this.player.kills,
         missionsCompleted: this.player.missionsCompleted,

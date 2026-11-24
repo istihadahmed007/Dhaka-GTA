@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { HudSnapshot, WeaponId, WEAPON_SPECS } from '../game/types';
+import { HudSnapshot, WeaponId, WEAPON_SPECS, PhoneContact } from '../game/types';
 import { Minimap } from './Minimap';
+import { WeaponWheel } from './WeaponWheel';
+import { Smartphone } from './Smartphone';
 
 interface GameHudProps {
   hud: HudSnapshot;
@@ -15,6 +17,11 @@ interface GameHudProps {
   onSwitchProtagonist?: () => void;
   onToggleAbility?: () => void;
   onCycleCamera?: () => void;
+  onTogglePhone?: () => void;
+  onToggleWeaponWheel?: (open?: boolean) => void;
+  onCallContact?: (contact: PhoneContact) => void;
+  onDepositMoney?: (amount: number) => void;
+  onSnapPhoto?: () => void;
 }
 
 const WEAPON_ORDER: WeaponId[] = ['fists', 'pistol', 'smg', 'shotgun'];
@@ -32,6 +39,11 @@ export const GameHud: React.FC<GameHudProps> = ({
   onSwitchProtagonist,
   onToggleAbility,
   onCycleCamera,
+  onTogglePhone,
+  onToggleWeaponWheel,
+  onCallContact,
+  onDepositMoney,
+  onSnapPhoto,
 }) => {
   // Delayed trailing damage ghost bar for player HP
   const [ghostHp, setGhostHp] = useState(hud.hp);
@@ -89,8 +101,66 @@ export const GameHud: React.FC<GameHudProps> = ({
         </div>
       )}
 
-      {/* TOP-LEFT: Compact Active Mission Objective & Toast */}
+      {/* TOP-LEFT: Compact Active Mission Objective, Robberies, Companion & Toast */}
       <div className="fixed top-4 left-4 max-w-[330px] flex flex-col gap-2">
+        {/* GTA VI Active Store Robbery Intimidation Widget */}
+        {hud.activeRobbery && (
+          <div className="bg-[#1c0d12]/95 border-l-4 border-[#ef4444] px-3.5 py-2.5 shadow-[0_6px_20px_rgba(239,68,68,0.5)] animate-pulse">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="font-display text-sm font-extrabold uppercase tracking-wider text-[#fca5a5]">
+                🚨 ROBBERY IN PROGRESS
+              </span>
+              <span className="text-[10px] font-mono text-red-300 font-bold">ALARM ARMED</span>
+            </div>
+            <div className="text-xs text-white mt-0.5 font-bold">{hud.activeRobbery.storeName}</div>
+            <div className="text-[11px] text-white/70 font-bangla">{hud.activeRobbery.storeBangla}</div>
+
+            {/* Intimidation Bar */}
+            <div className="mt-2">
+              <div className="flex items-center justify-between text-[10px] font-bold font-mono text-white/80 mb-0.5">
+                <span>CLERK INTIMIDATION</span>
+                <span>{Math.round(hud.activeRobbery.intimidation)}%</span>
+              </div>
+              <div className="h-2 bg-black/60 rounded overflow-hidden border border-white/20">
+                <div
+                  className="h-full bg-gradient-to-r from-yellow-500 to-red-500 transition-all duration-150"
+                  style={{ width: `${hud.activeRobbery.intimidation}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Cash Bagged Counter */}
+            <div className="mt-1.5 flex items-center justify-between text-xs font-mono font-extrabold text-[#4ade80]">
+              <span>CASH BAGGED:</span>
+              <span>৳{Math.round(hud.activeRobbery.cashBagged).toLocaleString()} / ৳{hud.activeRobbery.targetCash.toLocaleString()}</span>
+            </div>
+            <div className="text-[9px] text-white/60 mt-1 uppercase tracking-wider">
+              Keep weapon trained on clerk [H] · Avoid moving away
+            </div>
+          </div>
+        )}
+
+        {/* GTA VI Dual Protagonist Companion Tag-Team Widget */}
+        {hud.activeCompanion && (
+          <div className="bg-[#0f172a]/92 border-l-4 border-[#38bdf8] px-3 py-2 shadow-lg flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-full bg-[#1e293b] border border-[#38bdf8] flex items-center justify-center font-bold text-xs text-[#38bdf8]">
+                {hud.activeCompanion.id === 'maya' ? 'M' : 'T'}
+              </div>
+              <div>
+                <div className="text-xs font-bold text-white flex items-center gap-1.5 leading-none">
+                  <span>{hud.activeCompanion.name}</span>
+                  <span className="text-[9px] uppercase px-1.5 py-0.2 bg-[#0284c7]/40 text-[#38bdf8] rounded font-mono font-bold">
+                    {hud.activeCompanion.state === 'passenger' ? 'Riding Shotgun' : 'Cover Fire'}
+                  </span>
+                </div>
+                <div className="text-[10px] text-white/60 font-bangla mt-0.5">{hud.activeCompanion.banglaName}</div>
+              </div>
+            </div>
+            <div className="text-[10px] font-mono text-[#38bdf8] uppercase font-bold">TAG-TEAM</div>
+          </div>
+        )}
+
         {hud.activeSideMission && (
           <div className="bg-[#181326]/95 border-l-4 border-[#a855f7] px-3.5 py-2 shadow-[0_6px_18px_rgba(0,0,0,0.6)]">
             <div className="flex items-baseline justify-between gap-2">
@@ -242,6 +312,28 @@ export const GameHud: React.FC<GameHudProps> = ({
                 {hud.protagonistBangla}
               </span>
             </div>
+          </button>
+
+          {/* GTA VI Smartphone Button [P] */}
+          <button
+            type="button"
+            tabIndex={-1}
+            onClick={(e) => {
+              e.currentTarget.blur();
+              onTogglePhone?.();
+            }}
+            aria-label="Toggle Smartphone"
+            title="DhakaOS Smartphone [P]"
+            className={`pointer-events-auto h-9 px-2 flex items-center gap-1.5 border transition-all cursor-pointer ${
+              hud.smartphoneOpen
+                ? 'bg-[#ec4899]/30 border-[#ec4899] text-[#f472b6]'
+                : 'bg-[#10151c]/92 border-[#e6a135]/40 hover:border-[#f5d07a] text-[#f5f2eb]'
+            }`}
+          >
+            <span className="text-sm">📱</span>
+            <span className="font-display text-[10px] font-bold uppercase tracking-wider text-[#f5d07a]">
+              PHONE [P]
+            </span>
           </button>
 
           <button
@@ -410,6 +502,20 @@ export const GameHud: React.FC<GameHudProps> = ({
                 </button>
               );
             })}
+            {/* GTA VI Radial Weapon Wheel Button [Tab] */}
+            <button
+              type="button"
+              tabIndex={-1}
+              onClick={(e) => {
+                e.currentTarget.blur();
+                onToggleWeaponWheel?.(true);
+              }}
+              aria-label="Open Weapon Wheel"
+              title="GTA VI Weapon Wheel [Tab]"
+              className="pointer-events-auto px-1.5 py-0.5 text-[10px] font-bold uppercase border border-[#f5d07a]/50 bg-[#1c2430] text-[#f5d07a] hover:bg-[#0f7a53] hover:text-white cursor-pointer transition-colors"
+            >
+              [TAB] WHEEL
+            </button>
           </div>
         </div>
       </div>
@@ -423,6 +529,8 @@ export const GameHud: React.FC<GameHudProps> = ({
           blips={hud.blips}
           wantedLevel={hud.wantedLevel}
           inVehicle={hud.inVehicle}
+          policeSearchRadius={hud.policeSearchRadius}
+          companion={hud.activeCompanion}
         />
 
         <div className="w-36 sm:w-44 bg-[#10151c]/90 border border-white/12 p-2.5 shadow-[0_6px_18px_rgba(0,0,0,0.65)] flex flex-col gap-1.5">
@@ -664,6 +772,54 @@ export const GameHud: React.FC<GameHudProps> = ({
           </div>
         </div>
       )}
+
+      {/* GTA VI Monsoon Rain Camera Lens Droplets Effect */}
+      {(hud.weather === 'monsoon' || hud.weather === 'storm') && (
+        <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden opacity-45 mix-blend-screen">
+          <svg className="w-full h-full" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <filter id="droplet-blur">
+                <feGaussianBlur stdDeviation="1.5" />
+              </filter>
+            </defs>
+            <circle cx="15%" cy="22%" r="18" fill="rgba(255,255,255,0.22)" filter="url(#droplet-blur)" />
+            <circle cx="15.5%" cy="25%" r="7" fill="rgba(255,255,255,0.4)" />
+            <circle cx="78%" cy="18%" r="24" fill="rgba(255,255,255,0.25)" filter="url(#droplet-blur)" />
+            <circle cx="78.5%" cy="21%" r="10" fill="rgba(255,255,255,0.45)" />
+            <circle cx="85%" cy="65%" r="16" fill="rgba(255,255,255,0.2)" filter="url(#droplet-blur)" />
+            <circle cx="32%" cy="75%" r="22" fill="rgba(255,255,255,0.22)" filter="url(#droplet-blur)" />
+            <circle cx="50%" cy="12%" r="14" fill="rgba(255,255,255,0.18)" filter="url(#droplet-blur)" />
+            <circle cx="62%" cy="82%" r="26" fill="rgba(255,255,255,0.24)" filter="url(#droplet-blur)" />
+          </svg>
+        </div>
+      )}
+
+      {/* GTA VI Radial Weapon Wheel Modal */}
+      <WeaponWheel
+        isOpen={Boolean(hud.weaponWheelOpen)}
+        activeWeapon={hud.weapon}
+        unlockedWeapons={hud.unlockedWeapons}
+        magAmmo={hud.magAmmo}
+        reserveAmmo={hud.reserveAmmo}
+        inventory={hud.inventory}
+        onSelectWeapon={onSelectWeapon}
+        onUseItem={onUseItem}
+        onClose={() => onToggleWeaponWheel?.(false)}
+      />
+
+      {/* GTA VI In-Game Smartphone */}
+      <Smartphone
+        isOpen={Boolean(hud.smartphoneOpen)}
+        timeLabel={hud.timeLabel}
+        money={hud.money}
+        wantedLevel={hud.wantedLevel}
+        activeProtagonist={hud.activeProtagonist}
+        districtName={hud.districtName}
+        onClose={() => onTogglePhone?.()}
+        onCallContact={(contact) => onCallContact?.(contact)}
+        onDepositMoney={(amt) => onDepositMoney?.(amt)}
+        onSnapPhoto={() => onSnapPhoto?.()}
+      />
     </div>
   );
 };

@@ -72,6 +72,10 @@ Play as two distinct protagonists with separate identities, stats, weapons, clot
 | **Sprint** | `Shift` (Hold) | Left Stick Click |
 | **Jump / Handbrake** | `Space` | A / Cross Button |
 | **Switch Protagonist (GTA VI Sky-Cam)** | `C` | D-Pad Down |
+| **GTA VI In-Game Smartphone (DhakaLive / Fixers)** | `P` | Phone Button |
+| **GTA VI Radial Weapon Wheel (0.12x Bullet-Time)** | `Tab` (Hold) | Weapon Wheel Prompt |
+| **Rally Tag-Team Partner (Maya / Tariq Co-Op)** | `Y` | D-Pad Up |
+| **Store Robbery / Cash Counter Holdup** | `H` (Near Shop with Weapon) | Action Trigger |
 | **Cycle Camera View (1st / 3rd Close / Far / Cinematic)** | `V` | Select / Back Button |
 | **Protagonist Special Ability (Overdrive / Bullet-Time)** | `X` or `Q` | Both Sticks Click (L3+R3) |
 | **Attack / Fire Weapon** | `Left Click` or `F` | Right Trigger |

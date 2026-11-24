@@ -543,6 +543,76 @@ export interface HudSnapshot {
     playTimeSec: number;
     cause: string;
   };
+  // --- GTA VI Additions ---
+  weaponWheelOpen?: boolean;
+  smartphoneOpen?: boolean;
+  activeCompanion?: CompanionState | null;
+  activeRobbery?: StoreRobberyState | null;
+  policeSearchRadius?: PoliceSearchRadiusState | null;
+  activePhoneApp?: 'home' | 'dhakalive' | 'contacts' | 'camera' | 'banking';
+}
+
+export interface CompanionState {
+  id: ProtagonistId;
+  name: string;
+  banglaName: string;
+  hp: number;
+  maxHp: number;
+  state: 'following' | 'passenger' | 'combat';
+  weapon: WeaponId;
+  x?: number;
+  z?: number;
+}
+
+export interface StoreRobberyState {
+  storeId: string;
+  storeName: string;
+  storeBangla: string;
+  district: DistrictId;
+  x: number;
+  z: number;
+  intimidation: number; // 0..100
+  cashBagged: number;
+  targetCash: number;
+  state: 'intimidation' | 'bagging' | 'fleeing' | 'completed' | 'alarm';
+  timer: number;
+}
+
+export interface PoliceSearchRadiusState {
+  x: number;
+  z: number;
+  radius: number;
+  active: boolean;
+  searchTimer: number;
+}
+
+export interface SocialFeedPost {
+  id: string;
+  author: string;
+  handle: string;
+  avatarBg: string;
+  district: string;
+  caption: string;
+  captionBangla: string;
+  hashtags: string[];
+  likes: number;
+  commentsCount: number;
+  timestamp: string;
+  category: 'traffic' | 'stunt' | 'chaos' | 'news' | 'meme';
+  verified?: boolean;
+}
+
+export interface PhoneContact {
+  id: string;
+  name: string;
+  banglaName: string;
+  title: string;
+  avatarColor: string;
+  phone: string;
+  serviceType: 'vehicle_drop' | 'clear_heat' | 'weapons' | 'companion' | 'bank';
+  cost: number;
+  description: string;
+  banglaDescription: string;
 }
 
 export const VEHICLE_SPECS: Record<VehicleKind, VehicleSpec> = {

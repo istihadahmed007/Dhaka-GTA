@@ -112,6 +112,11 @@ const INITIAL_HUD: HudSnapshot = {
     playTimeSec: 0,
     cause: '',
   },
+  weaponWheelOpen: false,
+  smartphoneOpen: false,
+  activeCompanion: null,
+  activeRobbery: null,
+  policeSearchRadius: null,
 };
 
 export default function App() {
@@ -181,6 +186,11 @@ export default function App() {
   const handleSwitchProtagonist = useCallback(() => engineRef.current?.switchProtagonist(), []);
   const handleToggleAbility = useCallback(() => engineRef.current?.toggleSpecialAbility(), []);
   const handleCycleCamera = useCallback(() => engineRef.current?.cycleCameraView(), []);
+  const handleTogglePhone = useCallback(() => engineRef.current?.toggleSmartphone(), []);
+  const handleToggleWeaponWheel = useCallback((open?: boolean) => engineRef.current?.toggleWeaponWheel(open), []);
+  const handleCallContact = useCallback((c: any) => engineRef.current?.handleCallContact(c), []);
+  const handleDepositMoney = useCallback((amt: number) => engineRef.current?.handleDepositMoney(amt), []);
+  const handleSnapPhoto = useCallback(() => engineRef.current?.captureSnapshot(), []);
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-[#0b0e13]">
@@ -212,6 +222,11 @@ export default function App() {
           onSwitchProtagonist={handleSwitchProtagonist}
           onToggleAbility={handleToggleAbility}
           onCycleCamera={handleCycleCamera}
+          onTogglePhone={handleTogglePhone}
+          onToggleWeaponWheel={handleToggleWeaponWheel}
+          onCallContact={handleCallContact}
+          onDepositMoney={handleDepositMoney}
+          onSnapPhoto={handleSnapPhoto}
         />
       )}
 
