@@ -19,7 +19,9 @@ test('multiplayer: AccountStore persists accounts, starter wallet, and reconnect
   const store = new AccountStore();
 
   // 1. Initial creation
-  const auth1 = store.authenticate('Tariq_Mirpur', undefined, 'street');
+  const auth1 = store.authenticate('Tariq_Mirpur', undefined, undefined, 'street');
+  assert.equal(auth1.ok, true);
+  if (!auth1.ok) return;
   assert.equal(auth1.isNew, true);
   assert.equal(auth1.account.name, 'Tariq_Mirpur');
   assert.equal(auth1.account.money, 1200);
@@ -29,11 +31,20 @@ test('multiplayer: AccountStore persists accounts, starter wallet, and reconnect
 
   // 2. Reconnection using session token
   const auth2 = store.authenticate('DifferentNameIgnored', auth1.account.token);
+  assert.equal(auth2.ok, true);
+  if (!auth2.ok) return;
   assert.equal(auth2.isNew, false);
   assert.equal(auth2.account.id, auth1.account.id);
   assert.equal(auth2.account.name, 'Tariq_Mirpur');
 
-  // 3. Update stats & verify persistence
+  // 3. Attempting to take over existing name without token or PIN must be rejected
+  const authTakeover = store.authenticate('Tariq_Mirpur');
+  assert.equal(authTakeover.ok, false);
+  if (!authTakeover.ok) {
+    assert.equal(authTakeover.code, 'AUTH_REQUIRED');
+  }
+
+  // 4. Update stats & verify persistence
   store.updateStats(auth1.account.id, {
     money: 2500,
     kills: 3,
@@ -295,4 +306,86 @@ test('multiplayer: Snapshot interpolation calculates smooth positions between ti
 
   assert.equal(interpX, 15);
   assert.equal(interpHp, 95);
+});
+
+test('multiplayer: AccountStore enforces PIN authentication for protected CallSigns', () => {
+  const store = new AccountStore();
+
+  // 1. Register with PIN
+  const registered = store.authenticate('SyndicateBoss', undefined, '7788');
+  assert.equal(registered.ok, true);
+  if (!registered.ok) return;
+  assert.equal(registered.account.pin, '7788');
+
+  // 2. Reject incorrect PIN
+  const wrongPin = store.authenticate('SyndicateBoss', undefined, '0000');
+  assert.equal(wrongPin.ok, false);
+
+  // 3. Reject missing PIN
+  const noPin = store.authenticate('SyndicateBoss');
+  assert.equal(noPin.ok, false);
+
+  // 4. Accept correct PIN
+  const correctPin = store.authenticate('SyndicateBoss', undefined, '7788');
+  assert.equal(correctPin.ok, true);
+  if (correctPin.ok) {
+    assert.equal(correctPin.account.id, registered.account.id);
+  }
+
+  store.close();
+});
+
+test('multiplayer: Server rejects NaN, Infinity, and malformed packets', async () => {
+  const store = new AccountStore();
+  const server = new DhakaAuthoritativeServer(store);
+  await server.listen(0);
+  const port = server.getPort();
+
+  const ws = new WebSocket(`ws://localhost:${port}`);
+  await new Promise<void>((resolve) => ws.on('open', resolve));
+
+  const receivedMessages: any[] = [];
+  ws.on('message', (data) => {
+    receivedMessages.push(JSON.parse(data.toString()));
+  });
+
+  // 1. Send invalid non-JSON string
+  ws.send('this is not json');
+  await new Promise((r) => setTimeout(r, 60));
+  assert.ok(receivedMessages.some((m) => m.type === 's_error' && m.code === 'MALFORMED_JSON'));
+
+  // 2. Authenticate cleanly
+  ws.send(JSON.stringify({ type: 'c_auth', name: 'SafeDriver_99' }));
+  await new Promise((r) => setTimeout(r, 60));
+
+  // 3. Send NaN in dt
+  ws.send(JSON.stringify({
+    type: 'c_input',
+    seq: 1,
+    dt: 'not-a-number',
+    moveX: 0,
+    moveZ: 0,
+    heading: 0,
+    sprint: false,
+    jump: false,
+  }));
+  await new Promise((r) => setTimeout(r, 60));
+  assert.ok(receivedMessages.some((m) => m.type === 's_error' && m.code === 'INVALID_PACKET'));
+
+  // 4. Send out-of-bounds movement vector
+  ws.send(JSON.stringify({
+    type: 'c_input',
+    seq: 2,
+    dt: 0.05,
+    moveX: 999.0, // speedhack value
+    moveZ: 0,
+    heading: 0,
+    sprint: false,
+    jump: false,
+  }));
+  await new Promise((r) => setTimeout(r, 60));
+  assert.ok(receivedMessages.some((m) => m.type === 's_error' && m.code === 'INVALID_PACKET'));
+
+  ws.close();
+  await server.stop();
 });

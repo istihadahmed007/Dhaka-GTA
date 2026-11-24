@@ -11,6 +11,7 @@ import {
   WeatherMode,
 } from '../game/types';
 import { SAFEHOUSE_SPECS } from '../game/worldData';
+import { resolveServerUrl } from '../game/multiplayer/protocol';
 import { OPEN_METEO_ATTRIBUTION } from '../api/openMeteoClient';
 import { BDAPIS_ATTRIBUTION } from '../api/bdapisClient';
 import { OSM_ATTRIBUTION_NOTE } from '../game/dhakaGeoData';
@@ -37,7 +38,7 @@ interface OverlaysProps {
   onVehicleUpgrade?: (option: 'engine' | 'brakes' | 'turbo' | 'spoiler' | 'tint' | 'neon' | 'jammer', val?: any) => void;
   onUseItem?: (itemId: string) => void;
   onDialogueOption?: (optionId: string) => void;
-  onConnectMultiplayer?: (serverUrl: string, callsign: string) => void;
+  onConnectMultiplayer?: (serverUrl: string, callsign: string, pin?: string) => void;
   onDisconnectMultiplayer?: () => void;
 }
 
@@ -76,8 +77,9 @@ export const Overlays: React.FC<OverlaysProps> = ({
   onDisconnectMultiplayer,
 }) => {
   const [garageTab, setGarageTab] = useState<'service' | 'performance' | 'styling'>('service');
-  const [serverUrl, setServerUrl] = useState('ws://localhost:8080');
+  const [serverUrl, setServerUrl] = useState(() => resolveServerUrl());
   const [callsign, setCallsign] = useState('DhakaRider');
+  const [pin, setPin] = useState('');
   // 1. PAUSE MODAL
   if (hud.phase === 'paused') {
     const lw = hud.liveWeather;
@@ -913,7 +915,7 @@ export const Overlays: React.FC<OverlaysProps> = ({
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
                 <div>
                   <label className="block text-[11px] font-bold uppercase text-[#94a3b8] mb-1">Server WebSocket URL</label>
                   <input
@@ -923,7 +925,7 @@ export const Overlays: React.FC<OverlaysProps> = ({
                     onChange={(e) => setServerUrl(e.target.value)}
                     disabled={hud.multiplayerActive}
                     className="w-full bg-[#111720] border border-white/20 px-3 py-1.5 text-sm text-[#f8f5ee] focus:border-[#e6a135] focus:outline-none"
-                    placeholder="ws://localhost:8080"
+                    placeholder="wss://... or ws://localhost:8080"
                   />
                 </div>
                 <div>
@@ -934,8 +936,22 @@ export const Overlays: React.FC<OverlaysProps> = ({
                     value={callsign}
                     onChange={(e) => setCallsign(e.target.value)}
                     disabled={hud.multiplayerActive}
+                    maxLength={16}
                     className="w-full bg-[#111720] border border-white/20 px-3 py-1.5 text-sm text-[#f8f5ee] focus:border-[#e6a135] focus:outline-none"
                     placeholder="DhakaRider"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold uppercase text-[#94a3b8] mb-1">Account PIN (Protect CallSign)</label>
+                  <input
+                    type="password"
+                    data-testid="mp-pin-input"
+                    value={pin}
+                    onChange={(e) => setPin(e.target.value)}
+                    disabled={hud.multiplayerActive}
+                    maxLength={8}
+                    className="w-full bg-[#111720] border border-white/20 px-3 py-1.5 text-sm text-[#f8f5ee] focus:border-[#e6a135] focus:outline-none"
+                    placeholder="4-8 digit PIN"
                   />
                 </div>
               </div>
@@ -954,7 +970,7 @@ export const Overlays: React.FC<OverlaysProps> = ({
                   <button
                     type="button"
                     data-testid="mp-connect-btn"
-                    onClick={() => onConnectMultiplayer?.(serverUrl, callsign)}
+                    onClick={() => onConnectMultiplayer?.(serverUrl, callsign, pin)}
                     className="px-6 py-2 bg-[#0f7a53] hover:bg-[#149465] text-[#f8fafc] font-display text-sm font-bold uppercase tracking-wider cursor-pointer"
                   >
                     Connect to Server

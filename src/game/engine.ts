@@ -118,7 +118,7 @@ import {
 } from './waterSystem';
 import { NetworkClient } from './multiplayer/networkClient';
 import { RemotePlayerRig } from './multiplayer/remotePlayerRig';
-import { NetPlayerState, SCombatEventMsg } from './multiplayer/protocol';
+import { NetPlayerState, resolveServerUrl, SCombatEventMsg } from './multiplayer/protocol';
 
 interface ParticleSlot {
   active: boolean;
@@ -1009,7 +1009,11 @@ export class DhakaGameEngine {
     this.emitHud();
   }
 
-  public connectMultiplayer(serverUrl = 'ws://localhost:8080', callsign = 'DhakaPlayer'): void {
+  public connectMultiplayer(
+    serverUrl = resolveServerUrl(),
+    callsign = 'DhakaPlayer',
+    pin?: string,
+  ): void {
     if (this.netClient) {
       this.disconnectMultiplayer();
     }
@@ -1093,7 +1097,7 @@ export class DhakaGameEngine {
       },
     });
 
-    this.netClient.connect(callsign, this.player.outfit);
+    this.netClient.connect(callsign, this.player.outfit, undefined, pin);
   }
 
   public disconnectMultiplayer(): void {
@@ -2398,12 +2402,17 @@ export class DhakaGameEngine {
 
     this.playerRig.animator.update(dt, {
       speed: horizSpeed,
+      velocity: { x: this.player.vx, y: this.player.vy, z: this.player.vz },
+      heading: this.player.heading,
       maxWalkSpeed: inWater ? 1.8 : 5.8,
       maxRunSpeed: inWater ? 3.0 : 9.6,
       isGrounded: this.player.grounded,
+      isJumping: !this.player.grounded && this.player.vy > 0.5,
+      isFalling: !this.player.grounded && this.player.vy < -0.5,
+      verticalVelocity: this.player.vy,
       isSwimming: inWater,
       weapon: this.player.weapon,
-      isAiming: this.player.weapon !== 'fists',
+      isAiming: this.player.weapon !== 'fists' && this.mouseHeld,
     });
   }
 
@@ -3643,7 +3652,7 @@ export class DhakaGameEngine {
     }
 
     // Contextual framing: Over-the-right-shoulder aiming
-    const isAiming = !inVeh && (this.mouseHeld || this.keysHeld.has('KeyQ'));
+    const isAiming = !inVeh && (this.mouseHeld && this.player.weapon !== 'fists');
     let shoulderOffsetX = 0;
     let shoulderOffsetZ = 0;
     if (isAiming) {

@@ -28,6 +28,11 @@ interface ConnectedSession {
   attackCooldownTimer: number;
   respawnTimer: number;
   lastPingTime: number;
+  ip: string;
+  packetCountWindow: number;
+  packetWindowResetMs: number;
+  chatCountWindow: number;
+  chatWindowResetMs: number;
 }
 
 interface ServerVehicle {
@@ -55,6 +60,8 @@ export class DhakaAuthoritativeServer {
   private httpServer: http.Server | null = null;
   private sessions = new Map<string, ConnectedSession>(); // playerId -> session
   private wsToPlayerId = new Map<WebSocket, string>();
+  private ipConnections = new Map<string, number>();
+  private wsToIp = new Map<WebSocket, string>();
   private vehicles: ServerVehicle[] = [];
   private accountStore: AccountStore;
   private tickInterval: NodeJS.Timeout | null = null;
@@ -125,8 +132,8 @@ export class DhakaAuthoritativeServer {
 
       this.wss = new WebSocketServer({ server: this.httpServer });
 
-      this.wss.on('connection', (ws: WebSocket) => {
-        this.handleConnection(ws);
+      this.wss.on('connection', (ws: WebSocket, req: http.IncomingMessage) => {
+        this.handleConnection(ws, req);
       });
 
       this.httpServer.listen(port, () => {
@@ -142,13 +149,28 @@ export class DhakaAuthoritativeServer {
   public attachToExistingServer(server: http.Server): void {
     this.httpServer = server;
     this.wss = new WebSocketServer({ server, path: '/ws' });
-    this.wss.on('connection', (ws: WebSocket) => {
-      this.handleConnection(ws);
+    this.wss.on('connection', (ws: WebSocket, req: http.IncomingMessage) => {
+      this.handleConnection(ws, req);
     });
     this.startTickLoop();
   }
 
-  private handleConnection(ws: WebSocket): void {
+  private handleConnection(ws: WebSocket, req?: http.IncomingMessage): void {
+    const ip = req?.socket?.remoteAddress || req?.headers?.['x-forwarded-for']?.toString().split(',')[0].trim() || 'local';
+    const currentIpCount = this.ipConnections.get(ip) || 0;
+
+    if (currentIpCount >= 6) {
+      this.sendToWs(ws, {
+        type: 's_auth_fail',
+        reason: 'Connection limit reached for this IP address (Max 6 concurrent connections)',
+      });
+      ws.close();
+      return;
+    }
+
+    this.ipConnections.set(ip, currentIpCount + 1);
+    this.wsToIp.set(ws, ip);
+
     if (this.sessions.size >= MAX_SIMULTANEOUS_PLAYERS) {
       this.sendToWs(ws, {
         type: 's_auth_fail',
@@ -160,10 +182,17 @@ export class DhakaAuthoritativeServer {
 
     ws.on('message', (data: Buffer | string) => {
       try {
-        const msg = JSON.parse(data.toString()) as ClientMessage;
-        this.handleClientMessage(ws, msg);
+        const raw = JSON.parse(data.toString());
+        const validated = this.validatePacket(raw);
+        if (!validated.valid) {
+          console.warn(`[DhakaServer] Dropped invalid packet from ${ip}: ${validated.reason}`);
+          this.sendToWs(ws, { type: 's_error', code: 'INVALID_PACKET', message: validated.reason });
+          return;
+        }
+        this.handleClientMessage(ws, validated.msg);
       } catch (err) {
-        console.warn('[DhakaServer] Malformed packet received:', err);
+        console.warn('[DhakaServer] Malformed non-JSON packet received from', ip);
+        this.sendToWs(ws, { type: 's_error', code: 'MALFORMED_JSON', message: 'Payload must be valid JSON' });
       }
     });
 
@@ -175,6 +204,107 @@ export class DhakaAuthoritativeServer {
       console.warn('[DhakaServer] Socket error:', err.message);
       this.handleDisconnect(ws);
     });
+  }
+
+  private validatePacket(raw: any): { valid: true; msg: ClientMessage } | { valid: false; reason: string } {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      return { valid: false, reason: 'Packet must be a JSON object' };
+    }
+
+    if (typeof raw.type !== 'string') {
+      return { valid: false, reason: 'Packet missing string type field' };
+    }
+
+    const isNum = (v: any): v is number => typeof v === 'number' && Number.isFinite(v);
+
+    switch (raw.type) {
+      case 'c_auth':
+        if (typeof raw.name !== 'string' || raw.name.trim().length === 0 || raw.name.length > 24) {
+          return { valid: false, reason: 'Invalid callsign name' };
+        }
+        if (raw.token !== undefined && typeof raw.token !== 'string') {
+          return { valid: false, reason: 'Token must be a string' };
+        }
+        if (raw.pin !== undefined && typeof raw.pin !== 'string') {
+          return { valid: false, reason: 'PIN must be a string' };
+        }
+        return { valid: true, msg: raw as ClientMessage };
+
+      case 'c_input':
+        if (!isNum(raw.seq) || !Number.isInteger(raw.seq) || raw.seq < 1) {
+          return { valid: false, reason: 'Invalid input sequence number' };
+        }
+        if (!isNum(raw.dt) || raw.dt <= 0 || raw.dt > 0.25) {
+          return { valid: false, reason: 'Invalid or out-of-range delta time' };
+        }
+        if (!isNum(raw.moveX) || !isNum(raw.moveZ) || Math.abs(raw.moveX) > 1.5 || Math.abs(raw.moveZ) > 1.5) {
+          return { valid: false, reason: 'Movement vector must be finite numbers in range [-1.5, 1.5]' };
+        }
+        if (!isNum(raw.heading)) {
+          return { valid: false, reason: 'Heading must be a finite number' };
+        }
+        if (typeof raw.sprint !== 'boolean' || typeof raw.jump !== 'boolean') {
+          return { valid: false, reason: 'Sprint and jump must be booleans' };
+        }
+        return { valid: true, msg: raw as ClientMessage };
+
+      case 'c_vehicle_input':
+        if (!isNum(raw.seq) || !Number.isInteger(raw.seq) || raw.seq < 1) {
+          return { valid: false, reason: 'Invalid vehicle sequence number' };
+        }
+        if (!isNum(raw.throttle) || Math.abs(raw.throttle) > 1.5) {
+          return { valid: false, reason: 'Throttle must be a finite number in range [-1.5, 1.5]' };
+        }
+        if (!isNum(raw.steer) || Math.abs(raw.steer) > 1.5) {
+          return { valid: false, reason: 'Steer must be a finite number in range [-1.5, 1.5]' };
+        }
+        if (typeof raw.handbrake !== 'boolean' || typeof raw.horn !== 'boolean') {
+          return { valid: false, reason: 'Handbrake and horn must be booleans' };
+        }
+        return { valid: true, msg: raw as ClientMessage };
+
+      case 'c_vehicle_action':
+        if (raw.action !== 'enter' && raw.action !== 'exit') {
+          return { valid: false, reason: 'Vehicle action must be "enter" or "exit"' };
+        }
+        if (raw.vehicleId !== undefined && typeof raw.vehicleId !== 'string') {
+          return { valid: false, reason: 'Vehicle ID must be a string' };
+        }
+        return { valid: true, msg: raw as ClientMessage };
+
+      case 'c_attack':
+        if (!isNum(raw.seq) || !Number.isInteger(raw.seq) || raw.seq < 1) {
+          return { valid: false, reason: 'Invalid attack sequence number' };
+        }
+        if (!['fists', 'pistol', 'smg', 'shotgun'].includes(raw.weapon)) {
+          return { valid: false, reason: 'Invalid weapon identifier' };
+        }
+        if (!isNum(raw.aimHeading)) {
+          return { valid: false, reason: 'Aim heading must be a finite number' };
+        }
+        return { valid: true, msg: raw as ClientMessage };
+
+      case 'c_chat':
+        if (typeof raw.text !== 'string' || raw.text.trim().length === 0 || raw.text.length > 140) {
+          return { valid: false, reason: 'Chat message must be a string between 1 and 140 characters' };
+        }
+        return { valid: true, msg: raw as ClientMessage };
+
+      case 'c_buy_item':
+        if (typeof raw.itemId !== 'string' || raw.itemId.length > 64) {
+          return { valid: false, reason: 'Item ID must be a string' };
+        }
+        return { valid: true, msg: raw as ClientMessage };
+
+      case 'c_ping':
+        if (!isNum(raw.clientTime) || raw.clientTime <= 0) {
+          return { valid: false, reason: 'Ping clientTime must be a positive finite timestamp' };
+        }
+        return { valid: true, msg: raw as ClientMessage };
+
+      default:
+        return { valid: false, reason: `Unknown packet type "${String(raw.type)}"` };
+    }
   }
 
   private handleClientMessage(ws: WebSocket, msg: ClientMessage): void {
@@ -192,6 +322,30 @@ export class DhakaAuthoritativeServer {
 
     const session = this.sessions.get(playerId);
     if (!session) return;
+
+    // Rate limiting: 60 pkts/s max, 4 chat/s max
+    const now = Date.now();
+    if (now > session.packetWindowResetMs) {
+      session.packetCountWindow = 0;
+      session.packetWindowResetMs = now + 1000;
+    }
+    session.packetCountWindow++;
+    if (session.packetCountWindow > 60) {
+      this.sendToWs(ws, { type: 's_error', code: 'RATE_LIMIT', message: 'Input rate limit exceeded (max 60 packets/sec)' });
+      return;
+    }
+
+    if (msg.type === 'c_chat') {
+      if (now > session.chatWindowResetMs) {
+        session.chatCountWindow = 0;
+        session.chatWindowResetMs = now + 1000;
+      }
+      session.chatCountWindow++;
+      if (session.chatCountWindow > 4) {
+        this.sendToWs(ws, { type: 's_error', code: 'CHAT_LIMIT', message: 'Chat rate limit exceeded (max 4 messages/sec)' });
+        return;
+      }
+    }
 
     switch (msg.type) {
       case 'c_input':
@@ -221,12 +375,23 @@ export class DhakaAuthoritativeServer {
   }
 
   private handleAuth(ws: WebSocket, msg: ClientMessage & { type: 'c_auth' }): void {
-    const { account, isNew } = this.accountStore.authenticate(
+    const authResult = this.accountStore.authenticate(
       msg.name,
       msg.token,
+      msg.pin,
       msg.outfit ?? 'street',
       msg.color ?? 0x26466d,
     );
+
+    if (!authResult.ok) {
+      this.sendToWs(ws, {
+        type: 's_auth_fail',
+        reason: authResult.error,
+      });
+      return;
+    }
+
+    const { account, isNew } = authResult;
 
     // Evict previous active session if reconnecting on a fresh socket
     const existing = this.sessions.get(account.id);
@@ -268,15 +433,22 @@ export class DhakaAuthoritativeServer {
       ping: 25,
     };
 
+    const ip = this.wsToIp.get(ws) || 'local';
+    const now = Date.now();
     const session: ConnectedSession = {
       ws,
       account,
       state: playerState,
       lastProcessedSeq: 0,
-      lastInputTime: Date.now(),
+      lastInputTime: now,
       attackCooldownTimer: 0,
       respawnTimer: 0,
-      lastPingTime: Date.now(),
+      lastPingTime: now,
+      ip,
+      packetCountWindow: 0,
+      packetWindowResetMs: now + 1000,
+      chatCountWindow: 0,
+      chatWindowResetMs: now + 1000,
     };
 
     this.sessions.set(account.id, session);
@@ -719,6 +891,17 @@ export class DhakaAuthoritativeServer {
   }
 
   private handleDisconnect(ws: WebSocket): void {
+    const ip = this.wsToIp.get(ws);
+    if (ip) {
+      this.wsToIp.delete(ws);
+      const count = this.ipConnections.get(ip) || 0;
+      if (count <= 1) {
+        this.ipConnections.delete(ip);
+      } else {
+        this.ipConnections.set(ip, count - 1);
+      }
+    }
+
     const playerId = this.wsToPlayerId.get(ws);
     if (!playerId) return;
 
@@ -733,6 +916,8 @@ export class DhakaAuthoritativeServer {
       const veh = this.vehicles.find((v) => v.id === session.state.vehicleId);
       if (veh && veh.driverId === playerId) {
         veh.driverId = null;
+        veh.sirenOn = false;
+        veh.honkActive = false;
       }
     }
 

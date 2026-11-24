@@ -7,6 +7,7 @@ export interface PersistentAccount {
   id: string;
   name: string;
   token: string;
+  pin?: string;
   outfit: OutfitId;
   color: number;
   money: number;
@@ -22,6 +23,10 @@ export interface PersistentAccount {
   createdAt: number;
   lastSeenAt: number;
 }
+
+export type AuthResult =
+  | { ok: true; account: PersistentAccount; isNew: boolean }
+  | { ok: false; error: string; code: 'AUTH_REQUIRED' | 'INVALID_TOKEN' | 'NAME_TAKEN' | 'INVALID_INPUT' };
 
 export class AccountStore {
   private accounts = new Map<string, PersistentAccount>();
@@ -41,42 +46,66 @@ export class AccountStore {
   public authenticate(
     name: string,
     token?: string,
+    pin?: string,
     preferredOutfit: OutfitId = 'street',
     preferredColor = 0x26466d,
-  ): { account: PersistentAccount; isNew: boolean } {
-    const cleanName = name.trim().slice(0, 16) || 'Tariq_Dhaka';
-
-    // 1. Reconnection via token
-    if (token) {
-      const id = this.tokenToId.get(token);
-      if (id) {
-        const existing = this.accounts.get(id);
-        if (existing) {
-          existing.lastSeenAt = Date.now();
-          this.scheduleSave();
-          return { account: existing, isNew: false };
-        }
-      }
+  ): AuthResult {
+    const cleanName = (name || '').trim().slice(0, 16);
+    if (!cleanName || !/^[a-zA-Z0-9_\-\u0980-\u09FF ]{2,16}$/.test(cleanName)) {
+      return {
+        ok: false,
+        error: 'CallSign must be between 2 and 16 letters, numbers, or Bangla characters.',
+        code: 'INVALID_INPUT',
+      };
     }
 
-    // 2. Existing account by username
-    const existingId = this.nameToId.get(cleanName.toLowerCase());
+    // 1. Reconnection via secret session token
+    if (token) {
+      const cleanToken = token.trim();
+      const id = this.tokenToId.get(cleanToken);
+      if (id) {
+        const existing = this.accounts.get(id);
+        if (existing && existing.token === cleanToken) {
+          existing.lastSeenAt = Date.now();
+          this.scheduleSave();
+          return { ok: true, account: existing, isNew: false };
+        }
+      }
+      return {
+        ok: false,
+        error: 'Session token invalid or expired. Enter your CallSign and PIN to sign in.',
+        code: 'INVALID_TOKEN',
+      };
+    }
+
+    const lowerName = cleanName.toLowerCase();
+    const existingId = this.nameToId.get(lowerName);
+
+    // 2. Existing account with this name: require verified ownership (PIN or valid token)
     if (existingId) {
       const existing = this.accounts.get(existingId);
       if (existing) {
-        existing.lastSeenAt = Date.now();
-        this.scheduleSave();
-        return { account: existing, isNew: false };
+        if (pin && existing.pin && existing.pin === pin.trim()) {
+          existing.lastSeenAt = Date.now();
+          this.scheduleSave();
+          return { ok: true, account: existing, isNew: false };
+        }
+        return {
+          ok: false,
+          error: `CallSign "${cleanName}" is already registered. Enter your account PIN or reconnect using your session token.`,
+          code: 'AUTH_REQUIRED',
+        };
       }
     }
 
     // 3. Create fresh account
-    const id = `usr_${crypto.randomBytes(6).toString('hex')}`;
-    const newToken = `tok_${crypto.randomBytes(16).toString('hex')}`;
+    const id = `usr_${crypto.randomBytes(8).toString('hex')}`;
+    const newToken = `tok_${crypto.randomBytes(24).toString('hex')}`;
     const account: PersistentAccount = {
       id,
       name: cleanName,
       token: newToken,
+      pin: pin ? pin.trim().slice(0, 8) : undefined,
       outfit: preferredOutfit,
       color: preferredColor,
       money: 1200, // Starter Taka
@@ -99,11 +128,11 @@ export class AccountStore {
     };
 
     this.accounts.set(id, account);
-    this.nameToId.set(cleanName.toLowerCase(), id);
+    this.nameToId.set(lowerName, id);
     this.tokenToId.set(newToken, id);
     this.scheduleSave();
 
-    return { account, isNew: true };
+    return { ok: true, account, isNew: true };
   }
 
   public getById(id: string): PersistentAccount | null {
@@ -161,7 +190,9 @@ export class AccountStore {
       const dir = path.dirname(this.filePath);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       const records = Array.from(this.accounts.values());
-      fs.writeFileSync(this.filePath, JSON.stringify(records, null, 2), 'utf8');
+      const tempPath = `${this.filePath}.${Date.now()}.tmp`;
+      fs.writeFileSync(tempPath, JSON.stringify(records, null, 2), 'utf8');
+      fs.renameSync(tempPath, this.filePath);
       this.dirty = false;
     } catch (err) {
       console.error('[AccountStore] Failed to save accounts to disk:', err);

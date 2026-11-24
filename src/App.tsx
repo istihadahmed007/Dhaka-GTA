@@ -159,7 +159,8 @@ export default function App() {
   const handleUseItem = useCallback((itemId: string) => engineRef.current?.handleUseItem(itemId), []);
   const handleDialogueOption = useCallback((optionId: string) => engineRef.current?.handleDialogueOption(optionId), []);
   const handleConnectMultiplayer = useCallback(
-    (serverUrl: string, callsign: string) => engineRef.current?.connectMultiplayer(serverUrl, callsign),
+    (serverUrl: string, callsign: string, pin?: string) =>
+      engineRef.current?.connectMultiplayer(serverUrl, callsign, pin),
     [],
   );
   const handleDisconnectMultiplayer = useCallback(() => engineRef.current?.disconnectMultiplayer(), []);

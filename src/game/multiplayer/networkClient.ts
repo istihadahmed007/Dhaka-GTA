@@ -12,6 +12,7 @@ import {
   NetPlayerState,
   NetVehicleSnapshot,
   NetWorldState,
+  resolveServerUrl,
   SCombatEventMsg,
   ServerMessage,
   SWorldSnapshotMsg,
@@ -115,7 +116,7 @@ export class NetworkClient {
   private currentPing = 0;
   private pingAccum = 0;
 
-  constructor(serverUrl = 'ws://localhost:8080', listener?: NetworkClientEventListener) {
+  constructor(serverUrl = resolveServerUrl(), listener?: NetworkClientEventListener) {
     this.url = serverUrl;
     if (listener) this.listeners = listener;
     // Load cached session token from localStorage if available
@@ -157,7 +158,7 @@ export class NetworkClient {
     }
   }
 
-  public connect(name: string, outfit: OutfitId = 'street', color = 0x26466d): void {
+  public connect(name: string, outfit: OutfitId = 'street', color = 0x26466d, pin?: string): void {
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
       return;
     }
@@ -180,6 +181,7 @@ export class NetworkClient {
         type: 'c_auth',
         name,
         token: this.token ?? undefined,
+        pin: pin || undefined,
         outfit,
         color,
       };
@@ -198,7 +200,7 @@ export class NetworkClient {
     this.ws.onclose = (event) => {
       this.connected = false;
       this.listeners.onDisconnect?.(event.reason || 'Connection lost');
-      this.scheduleReconnect(name, outfit, color);
+      this.scheduleReconnect(name, outfit, color, pin);
     };
 
     this.ws.onerror = () => {
@@ -206,7 +208,7 @@ export class NetworkClient {
     };
   }
 
-  private scheduleReconnect(name: string, outfit: OutfitId, color: number): void {
+  private scheduleReconnect(name: string, outfit: OutfitId, color: number, pin?: string): void {
     if (this.reconnecting || this.reconnectAttempts >= 5) return;
     this.reconnecting = true;
     this.reconnectAttempts++;
@@ -216,7 +218,7 @@ export class NetworkClient {
     this.reconnectTimer = window.setTimeout(() => {
       this.reconnectTimer = null;
       if (!this.connected) {
-        this.connect(name, outfit, color);
+        this.connect(name, outfit, color, pin);
       }
     }, delay);
   }
@@ -254,6 +256,15 @@ export class NetworkClient {
           localStorage.setItem('dhaka_mp_auth_token', msg.token);
         } catch {}
         this.listeners.onAuthOk?.(msg.player, msg.isNewAccount);
+        break;
+
+      case 's_auth_fail':
+        // Clear cached stale token on auth failure
+        try {
+          localStorage.removeItem('dhaka_mp_auth_token');
+        } catch {}
+        this.token = null;
+        this.listeners.onError?.(`Authentication failed: ${msg.reason}`);
         break;
 
       case 's_world_snapshot':

@@ -6,6 +6,43 @@ export const MAX_SIMULTANEOUS_PLAYERS = 16;
 export const DEFAULT_SERVER_PORT = 8080;
 export const INTERPOLATION_DELAY_MS = 100; // 100 ms buffer for silky smooth snapshot interpolation
 
+/**
+ * Public production WSS endpoint hosted independently from GitHub Pages.
+ * Can be overridden via VITE_MULTIPLAYER_SERVER_URL environment variable or in-game lobby.
+ */
+export const DEFAULT_PRODUCTION_WSS_URL = 'wss://dhaka-gta-server.onrender.com';
+
+/**
+ * Resolves appropriate WebSocket URL depending on runtime environment.
+ * In production (HTTPS / GitHub Pages), uses secure WSS production backend.
+ * In local development (HTTP / localhost), defaults to local dev server.
+ */
+export function resolveServerUrl(customUrl?: string): string {
+  if (customUrl && customUrl.trim().length > 0) {
+    return customUrl.trim();
+  }
+
+  // Runtime Vite environment variable override
+  if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_MULTIPLAYER_SERVER_URL) {
+    return String(import.meta.env.VITE_MULTIPLAYER_SERVER_URL).trim();
+  }
+
+  // If running in browser on production (e.g. GitHub Pages https://istihadahmed007.github.io)
+  if (typeof window !== 'undefined' && window.location) {
+    const isHttps = window.location.protocol === 'https:';
+    const isLocalhost =
+      window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1' ||
+      window.location.hostname.startsWith('192.168.');
+
+    if (isHttps || !isLocalhost) {
+      return DEFAULT_PRODUCTION_WSS_URL;
+    }
+  }
+
+  return `ws://localhost:${DEFAULT_SERVER_PORT}`;
+}
+
 export interface NetTransform {
   x: number;
   y: number;
@@ -88,6 +125,7 @@ export interface CAuthMsg {
   type: 'c_auth';
   name: string;
   token?: string; // Reconnect session token
+  pin?: string; // Account security PIN
   outfit?: OutfitId;
   color?: number;
 }
