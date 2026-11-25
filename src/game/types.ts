@@ -22,6 +22,7 @@ export type VehicleKind =
   | 'cng'
   | 'rickshaw'
   | 'sedan'
+  | 'supercar'
   | 'bus'
   | 'truck'
   | 'bike'
@@ -550,6 +551,7 @@ export interface HudSnapshot {
   activeRobbery?: StoreRobberyState | null;
   policeSearchRadius?: PoliceSearchRadiusState | null;
   activePhoneApp?: 'home' | 'dhakalive' | 'contacts' | 'camera' | 'banking';
+  motionTrajectoryActive?: boolean;
 }
 
 export interface CompanionState {
@@ -665,6 +667,23 @@ export const VEHICLE_SPECS: Record<VehicleKind, VehicleSpec> = {
     halfWidth: 1.05,
     halfLength: 2.25,
     defaultColor: 0xd9e1e8,
+    canDrift: true,
+  },
+  supercar: {
+    kind: 'supercar',
+    name: 'Dhaka Apex Supercar',
+    banglaName: 'এপেক্স সুপারকার',
+    maxSpeed: 38,
+    reverseSpeed: 12,
+    accel: 28,
+    brake: 36,
+    turnRate: 2.75,
+    drag: 1.5,
+    maxHp: 240,
+    mass: 1.35,
+    halfWidth: 1.15,
+    halfLength: 2.35,
+    defaultColor: 0xef4444,
     canDrift: true,
   },
   bike: {

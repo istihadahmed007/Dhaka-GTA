@@ -7,3 +7,18 @@ coverage/
 .env*
 !.env.example
 data/
+
+# Nested ProjectDhakaUnity Unity artifacts
+ProjectDhakaUnity/Library/
+ProjectDhakaUnity/Temp/
+ProjectDhakaUnity/Obj/
+ProjectDhakaUnity/Build/
+ProjectDhakaUnity/Builds/
+ProjectDhakaUnity/Logs/
+ProjectDhakaUnity/UserSettings/
+ProjectDhakaUnity/Screenshots/
+ProjectDhakaUnity/.utmp/
+ProjectDhakaUnity/.vs/
+ProjectDhakaUnity/*.csproj
+ProjectDhakaUnity/*.sln
+ProjectDhakaUnity/*.slnx

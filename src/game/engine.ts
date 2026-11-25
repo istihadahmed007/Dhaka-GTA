@@ -124,6 +124,7 @@ import { NetworkClient } from './multiplayer/networkClient';
 import { RemotePlayerRig } from './multiplayer/remotePlayerRig';
 import { NetPlayerState, resolveServerUrl, SCombatEventMsg } from './multiplayer/protocol';
 import { CameraRigController, CameraViewMode } from './cameraSystem';
+import { MotionTrajectoryVisualizer } from './motionTrajectory';
 import {
   CharacterSwitchState,
   createInitialCharacterSwitchState,
@@ -284,6 +285,8 @@ export class DhakaGameEngine {
 
   // Camera & Rig Controller
   private cameraRig: CameraRigController;
+  private motionTrajectory: MotionTrajectoryVisualizer;
+  private playerTurnRate = 0;
   private cameraViewMode: CameraViewMode = 'third_person_close';
   private camYaw = 0; // 0 means looking north (-Z) behind player
   private camPitch = 0.28;
@@ -479,6 +482,10 @@ export class DhakaGameEngine {
 
     this.trafficLights = createTrafficLightVisuals();
     this.scene.add(this.trafficLights.group);
+
+    // Fluid Motion Trajectory Visualizer (Images 1 & 2)
+    this.motionTrajectory = new MotionTrajectoryVisualizer();
+    this.scene.add(this.motionTrajectory.group);
 
     this.spawnInitialEntities();
     this.applyEnvironmentLighting(0);
@@ -923,20 +930,20 @@ export class DhakaGameEngine {
       },
       ownedVehicles: veh
         ? [
-            {
-              kind: veh.kind,
-              color: veh.color,
-              customization: veh.customization ?? {
-                engineStage: 0,
-                brakesStage: 0,
-                hasTurbo: false,
-                hasSpoiler: false,
-                tintLevel: 0,
-                neonColor: null,
-                plateJammer: false,
-              },
+          {
+            kind: veh.kind,
+            color: veh.color,
+            customization: veh.customization ?? {
+              engineStage: 0,
+              brakesStage: 0,
+              hasTurbo: false,
+              hasSpoiler: false,
+              tintLevel: 0,
+              neonColor: null,
+              plateJammer: false,
             },
-          ]
+          },
+        ]
         : [],
     };
 
@@ -1749,6 +1756,15 @@ export class DhakaGameEngine {
       return;
     }
 
+    // Toggle Fluid Motion Matching Trajectory Guide [T]
+    if (code === 'KeyT') {
+      if (this.phase === 'playing' && this.modal === 'none') {
+        const active = this.motionTrajectory.toggle();
+        this.showToast(active ? 'Fluid Motion Trajectory: ENABLED' : 'Fluid Motion Trajectory: DISABLED');
+        return;
+      }
+    }
+
     if (this.phase !== 'playing' || this.modal !== 'none') return;
 
     if (!this.keysHeld.has(code)) {
@@ -2434,11 +2450,14 @@ export class DhakaGameEngine {
       let diff = targetHeading - this.player.heading;
       while (diff > Math.PI) diff -= Math.PI * 2;
       while (diff < -Math.PI) diff += Math.PI * 2;
-      this.player.heading += diff * (1 - Math.exp(-13 * dt));
+      const turnStep = diff * (1 - Math.exp(-13 * dt));
+      this.player.heading += turnStep;
+      this.playerTurnRate = turnStep / dt;
     } else {
       const decel = 1 - Math.exp((inWater ? -6 : -12) * dt);
       this.player.vx *= 1 - decel;
       this.player.vz *= 1 - decel;
+      this.playerTurnRate *= Math.max(0, 1 - 10 * dt);
     }
 
     if (this.netClient && this.netClient.isConnected()) {
@@ -2544,6 +2563,7 @@ export class DhakaGameEngine {
       speed: horizSpeed,
       velocity: { x: this.player.vx, y: this.player.vy, z: this.player.vz },
       heading: this.player.heading,
+      turnRate: this.playerTurnRate,
       maxWalkSpeed: inWater ? 1.8 : 5.8,
       maxRunSpeed: inWater ? 3.0 : 9.6,
       isGrounded: this.player.grounded,
@@ -2554,6 +2574,18 @@ export class DhakaGameEngine {
       weapon: this.player.weapon,
       isAiming: this.player.weapon !== 'fists' && this.mouseHeld,
     });
+
+    // Update Fluid Motion Trajectory Visualizer (Images 1 & 2)
+    this.motionTrajectory.update(
+      dt,
+      this.player.x,
+      this.player.y,
+      this.player.z,
+      this.player.vx,
+      this.player.vz,
+      this.player.heading,
+      Boolean(this.player.vehicleId),
+    );
   }
 
   private startReload(): void {
@@ -2746,6 +2778,32 @@ export class DhakaGameEngine {
       const sternX = veh.x - Math.sin(veh.heading) * sternDist;
       const sternZ = veh.z - Math.cos(veh.heading) * sternDist;
       this.spawnBurst(sternX, 0.15, sternZ, 0xcfd8dc, 2, 2.0);
+    }
+
+    // High-speed aerodynamic wind streaks (Image 4 hyper-speed visual effect)
+    if (Math.abs(veh.speed) > 19.0 && !isWatercraftKind(veh.kind)) {
+      const flank = (Math.random() - 0.5) * 2.8;
+      const streakX = veh.x + Math.sin(veh.heading + Math.PI / 2) * flank;
+      const streakZ = veh.z + Math.cos(veh.heading + Math.PI / 2) * flank;
+      this.spawnBurst(streakX, 0.4 + Math.random() * 0.6, streakZ, 0xf8fafc, 1, 0.5);
+    }
+
+    // Supercar pop-flame exhaust backfire (Image 4)
+    if (veh.kind === 'supercar' && Math.abs(veh.speed) > 10.0 && throttle <= 0.05) {
+      if (Math.random() < 0.22) {
+        const sternDist = VEHICLE_SPECS.supercar.halfLength * 0.98;
+        const sternX = veh.x - Math.sin(veh.heading) * sternDist;
+        const sternZ = veh.z - Math.cos(veh.heading) * sternDist;
+        this.spawnBurst(sternX, 0.42, sternZ, 0x38bdf8, 2, 0.9);
+      }
+    }
+
+    // Motorcycle off-road dirt roost on hard throttle (Image 5 top)
+    if (veh.kind === 'bike' && throttle > 0.5 && Math.abs(veh.speed) > 4.0) {
+      const sternDist = VEHICLE_SPECS.bike.halfLength * 0.95;
+      const sternX = veh.x - Math.sin(veh.heading) * sternDist;
+      const sternZ = veh.z - Math.cos(veh.heading) * sternDist;
+      this.spawnBurst(sternX, 0.12, sternZ, 0x854d0e, 1, 1.4);
     }
 
     this.player.distanceDriven += Math.hypot(veh.x - prevX, veh.z - prevZ);
@@ -4257,16 +4315,16 @@ export class DhakaGameEngine {
     const isTariqActive = this.activeProtagonistId === 'tariq';
     const lines = isTariqActive
       ? [
-          { speaker: 'Maya', bangla: 'তারেক, পেছনে খেয়াল রাখো! পুলিশ কিন্তু পিছু ছাড়বে না!', english: 'Tariq, watch your six! Police won’t let up easily!' },
-          { speaker: 'Tariq', bangla: 'চকবাজারের গলিতে আমাদের ধরতে পারবে না, ভরসা রাখো!', english: 'They can’t catch us in these Old Dhaka alleys, trust me!' },
-          { speaker: 'Maya', bangla: 'আমার গান রেডি আছে। তুমি শুধু এক্সিলারেটর চেপে রাখো!', english: 'My weapon is locked and loaded. Just keep your foot on the gas!' },
-          { speaker: 'Tariq', bangla: 'ধোলাইখালের আসল ড্রিফট এখনও দেখোই নাই!', english: 'You haven’t even seen real Dholaikhal drifting yet!' },
-        ]
+        { speaker: 'Maya', bangla: 'তারেক, পেছনে খেয়াল রাখো! পুলিশ কিন্তু পিছু ছাড়বে না!', english: 'Tariq, watch your six! Police won’t let up easily!' },
+        { speaker: 'Tariq', bangla: 'চকবাজারের গলিতে আমাদের ধরতে পারবে না, ভরসা রাখো!', english: 'They can’t catch us in these Old Dhaka alleys, trust me!' },
+        { speaker: 'Maya', bangla: 'আমার গান রেডি আছে। তুমি শুধু এক্সিলারেটর চেপে রাখো!', english: 'My weapon is locked and loaded. Just keep your foot on the gas!' },
+        { speaker: 'Tariq', bangla: 'ধোলাইখালের আসল ড্রিফট এখনও দেখোই নাই!', english: 'You haven’t even seen real Dholaikhal drifting yet!' },
+      ]
       : [
-          { speaker: 'Tariq', bangla: 'মায়া, ফুল স্পিডে চলো! সিন্ডিকেটের খবর আমরা আজই বের করবো!', english: 'Maya, floor it! We’re busting this syndicate network today!' },
-          { speaker: 'Maya', bangla: 'তাদের সার্ভার ড্রাইভ আমার কাছে। আমাদের শুধু সদরে পৌঁছাতে হবে।', english: 'I have their server drive. We just need to make it to Sadarghat.' },
-          { speaker: 'Tariq', bangla: 'কোন চিন্তা নাই, আমি সামনে ক্লিয়ার করছি!', english: 'No worries, clearing the road ahead!' },
-        ];
+        { speaker: 'Tariq', bangla: 'মায়া, ফুল স্পিডে চলো! সিন্ডিকেটের খবর আমরা আজই বের করবো!', english: 'Maya, floor it! We’re busting this syndicate network today!' },
+        { speaker: 'Maya', bangla: 'তাদের সার্ভার ড্রাইভ আমার কাছে। আমাদের শুধু সদরে পৌঁছাতে হবে।', english: 'I have their server drive. We just need to make it to Sadarghat.' },
+        { speaker: 'Tariq', bangla: 'কোন চিন্তা নাই, আমি সামনে ক্লিয়ার করছি!', english: 'No worries, clearing the road ahead!' },
+      ];
     const pick = lines[Math.floor(Math.random() * lines.length)];
     this.triggerDialogue(pick.speaker, pick.bangla, pick.english, 5.5);
   }
@@ -4533,13 +4591,14 @@ export class DhakaGameEngine {
       smartphoneOpen: this.smartphoneOpen,
       activeCompanion: this.activeCompanion
         ? {
-            ...this.activeCompanion,
-            x: this.secondaryProtagonistRig ? this.secondaryProtagonistRig.group.position.x : undefined,
-            z: this.secondaryProtagonistRig ? this.secondaryProtagonistRig.group.position.z : undefined,
-          }
+          ...this.activeCompanion,
+          x: this.secondaryProtagonistRig ? this.secondaryProtagonistRig.group.position.x : undefined,
+          z: this.secondaryProtagonistRig ? this.secondaryProtagonistRig.group.position.z : undefined,
+        }
         : null,
       activeRobbery: this.activeRobbery ? { ...this.activeRobbery } : null,
       policeSearchRadius: this.policeSearchRadius ? { ...this.policeSearchRadius } : null,
+      motionTrajectoryActive: this.motionTrajectory.enabled,
       stats: {
         kills: this.player.kills,
         missionsCompleted: this.player.missionsCompleted,
@@ -4551,6 +4610,12 @@ export class DhakaGameEngine {
         cause: this.gameOverCause,
       },
     });
+  }
+
+  public toggleMotionTrajectory(): boolean {
+    const active = this.motionTrajectory.toggle();
+    this.showToast(active ? 'Fluid Motion Trajectory: ENABLED' : 'Fluid Motion Trajectory: DISABLED');
+    return active;
   }
 
   public dispose(): void {
@@ -4577,6 +4642,7 @@ export class DhakaGameEngine {
     });
     this.world.disposables.forEach((d) => d.dispose());
     this.trafficLights.dispose();
+    this.motionTrajectory.dispose();
     this.textures.dispose();
     this.audio.dispose();
     this.scene.clear();

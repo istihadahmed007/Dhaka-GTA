@@ -147,8 +147,8 @@ export function createVehicleRig(
   const primaryMat = new THREE.MeshStandardMaterial({
     color: colorHex,
     roughnessMap: kind === 'cng' || kind === 'rickshaw' || kind === 'bus' || kind === 'truck' ? textures.metalWearRoughness : null,
-    roughness: kind === 'sedan' || kind === 'bike' ? 0.24 : 0.52,
-    metalness: kind === 'sedan' || kind === 'bike' ? 0.65 : 0.36,
+    roughness: kind === 'supercar' ? 0.12 : kind === 'sedan' || kind === 'bike' ? 0.24 : 0.52,
+    metalness: kind === 'supercar' ? 0.88 : kind === 'sedan' || kind === 'bike' ? 0.65 : 0.36,
   });
   bodyMaterials.push(primaryMat);
 
@@ -853,6 +853,150 @@ export function createVehicleRig(
     wRR.position.set(0.96, 0.36, -1.38);
     wheels.push(wRL, wRR);
     group.add(wRL, wRR);
+  } else if (kind === 'supercar') {
+    // Dhaka Apex Supercar (Inspired by Next-Gen Hypercars & GTA VI)
+    addContactShadow(group, 1.35, 2.65, textures.contactShadowMap);
+    const carbonMat = new THREE.MeshStandardMaterial({ color: 0x111317, roughness: 0.32, metalness: 0.85 });
+    const caliperMat = new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.25, metalness: 0.75 });
+    const cockpitMat = new THREE.MeshStandardMaterial({ color: 0x16181f, roughness: 0.82 });
+
+    // 1. Ultra-Low Aerodynamic Wedge Chassis
+    const mainBody = new THREE.Mesh(new THREE.BoxGeometry(2.18, 0.44, 4.62), primaryMat);
+    mainBody.position.set(0, 0.48, 0);
+
+    // Front sloping hood with dual air-extractor vents
+    const noseWedge = new THREE.Mesh(new THREE.BoxGeometry(2.08, 0.24, 1.55), primaryMat);
+    noseWedge.position.set(0, 0.54, 1.52);
+    noseWedge.rotation.x = 0.12;
+    const hoodVentL = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.04, 0.65), carbonMat);
+    hoodVentL.position.set(-0.52, 0.65, 1.42);
+    hoodVentL.rotation.x = 0.12;
+    const hoodVentR = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.04, 0.65), carbonMat);
+    hoodVentR.position.set(0.52, 0.65, 1.42);
+    hoodVentR.rotation.x = 0.12;
+
+    // Carbon Front Splitter & Side Ground-Effect Skirts
+    const frontSplitter = new THREE.Mesh(new THREE.BoxGeometry(2.22, 0.06, 0.62), carbonMat);
+    frontSplitter.position.set(0, 0.26, 2.28);
+    const skirtL = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.14, 3.2), carbonMat);
+    skirtL.position.set(-1.12, 0.32, 0);
+    const skirtR = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.14, 3.2), carbonMat);
+    skirtR.position.set(1.12, 0.32, 0);
+
+    // Side Aerodynamic Air-Intake Pods
+    const intakeL = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.38, 0.95), carbonMat);
+    intakeL.position.set(-1.06, 0.58, -0.42);
+    const intakeR = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.38, 0.95), carbonMat);
+    intakeR.position.set(1.06, 0.58, -0.42);
+
+    chassisGroup.add(mainBody, noseWedge, hoodVentL, hoodVentR, frontSplitter, skirtL, skirtR, intakeL, intakeR);
+
+    // 2. Cockpit Canopy & Aerodynamic Glass
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.68, 0.48, 2.25), primaryMat);
+    cabin.position.set(0, 0.95, -0.2);
+
+    // Sleek raked panoramic windshield
+    const windshield = new THREE.Mesh(new THREE.BoxGeometry(1.64, 0.48, 0.12), darkGlassMat);
+    windshield.position.set(0, 0.98, 0.88);
+    windshield.rotation.x = -0.42;
+
+    // Rear engine louvers
+    const rearLouver = new THREE.Mesh(new THREE.BoxGeometry(1.62, 0.44, 0.12), carbonMat);
+    rearLouver.position.set(0, 0.96, -1.25);
+    rearLouver.rotation.x = 0.36;
+
+    const sideWin = new THREE.Mesh(new THREE.BoxGeometry(1.72, 0.38, 1.82), darkGlassMat);
+    sideWin.position.set(0, 0.94, -0.18);
+
+    // Roof scoop
+    const roofScoop = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.14, 0.95), carbonMat);
+    roofScoop.position.set(0, 1.24, -0.05);
+
+    chassisGroup.add(cabin, windshield, rearLouver, sideWin, roofScoop);
+
+    // 3. Active Rear GT Wing & Multi-Channel Aerodynamic Diffuser
+    const wingBlade = new THREE.Mesh(new THREE.BoxGeometry(2.12, 0.06, 0.46), carbonMat);
+    wingBlade.position.set(0, 1.2, -2.18);
+    const stanchionL = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.46, 0.28), carbonMat);
+    stanchionL.position.set(-0.68, 0.95, -2.14);
+    const stanchionR = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.46, 0.28), carbonMat);
+    stanchionR.position.set(0.68, 0.95, -2.14);
+
+    const diffuser = new THREE.Mesh(new THREE.BoxGeometry(1.98, 0.24, 0.58), carbonMat);
+    diffuser.position.set(0, 0.32, -2.26);
+
+    // Quad Titanium Exhaust Tips
+    [-0.48, -0.28, 0.28, 0.48].forEach((ex) => {
+      const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.052, 0.26, 10), chromeMat);
+      tip.rotation.x = Math.PI / 2;
+      tip.position.set(ex, 0.42, -2.36);
+      chassisGroup.add(tip);
+    });
+
+    chassisGroup.add(wingBlade, stanchionL, stanchionR, diffuser);
+
+    // 4. Full-Width Continuous Glowing LED Taillight Strip (Matching Image 4)
+    const ledStripMat = taillightMat.clone();
+    ledStripMat.emissiveIntensity = 1.8;
+    brakeLights.push(ledStripMat);
+    const rearLightStrip = new THREE.Mesh(new THREE.BoxGeometry(2.12, 0.09, 0.08), ledStripMat);
+    rearLightStrip.position.set(0, 0.68, -2.34);
+    chassisGroup.add(rearLightStrip);
+
+    // High-Intensity Xenon Headlight Blades
+    [-0.78, 0.78].forEach((hx) => {
+      const hl = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.11, 0.12), hlMat);
+      hl.position.set(hx, 0.62, 2.24);
+      hl.rotation.y = hx > 0 ? -0.15 : 0.15;
+      chassisGroup.add(hl);
+    });
+
+    // 5. Interior Sports Cockpit
+    const bucketL = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.52, 0.54), cockpitMat);
+    bucketL.position.set(-0.38, 0.62, 0.0);
+    const bucketR = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.52, 0.54), cockpitMat);
+    bucketR.position.set(0.38, 0.62, 0.0);
+
+    const swGroup = new THREE.Group();
+    swGroup.position.set(-0.38, 0.88, 0.42);
+    swGroup.rotation.x = -0.38;
+    const f1Wheel = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.18, 0.04), carbonMat);
+    swGroup.add(f1Wheel);
+    chassisGroup.add(bucketL, bucketR, swGroup);
+    steeringWheel = swGroup;
+
+    // 6. Wide Stance Performance Wheels & Red Calipers
+    const steerFL = new THREE.Group();
+    steerFL.position.set(-1.06, 0.36, 1.48);
+    const wFL = makeWheel(1.08);
+    const calFL = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.18, 0.22), caliperMat);
+    calFL.position.set(0.04, 0.12, 0);
+    steerFL.add(wFL, calFL);
+
+    const steerFR = new THREE.Group();
+    steerFR.position.set(1.06, 0.36, 1.48);
+    const wFR = makeWheel(1.08);
+    const calFR = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.18, 0.22), caliperMat);
+    calFR.position.set(-0.04, 0.12, 0);
+    steerFR.add(wFR, calFR);
+
+    group.add(steerFL, steerFR);
+    steerNodes.push(steerFL, steerFR);
+    wheels.push(wFL, wFR);
+
+    // Rear wide rolling wheels
+    const wRL = makeWheel(1.15);
+    wRL.position.set(-1.08, 0.38, -1.45);
+    const calRL = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.2, 0.24), caliperMat);
+    calRL.position.set(-1.04, 0.5, -1.45);
+
+    const wRR = makeWheel(1.15);
+    wRR.position.set(1.08, 0.38, -1.45);
+    const calRR = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.2, 0.24), caliperMat);
+    calRR.position.set(1.04, 0.5, -1.45);
+
+    wheels.push(wRL, wRR);
+    group.add(wRL, wRR, calRL, calRR);
   } else if (kind === 'launch') {
     // Multi-Deck Sadarghat Passenger River Launch (ঢাকা লঞ্চ)
     const steelHullMat = primaryMat;

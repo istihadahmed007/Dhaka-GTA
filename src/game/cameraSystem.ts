@@ -138,13 +138,13 @@ export class CameraRigController {
     if (input.inVehicle) {
       if (isFirstPerson) {
         // Cockpit view: driver eye level inside cabin
-        height = input.vehicleKind === 'launch' ? 2.8 : input.vehicleKind === 'bus' ? 2.4 : 1.15;
+        height = input.vehicleKind === 'supercar' ? 0.95 : input.vehicleKind === 'launch' ? 2.8 : input.vehicleKind === 'bus' ? 2.4 : 1.15;
         dist = 0.05;
         shoulder = input.vehicleKind === 'bike' ? 0 : -0.32; // Left-hand drive seat
       } else {
         // Vehicle chase cam adjusts for vehicle dimensions
-        dist = input.vehicleKind === 'launch' ? 12.0 : input.vehicleKind === 'bus' ? 9.8 : preset.distance * 1.35;
-        height = input.vehicleKind === 'launch' ? 4.2 : input.vehicleKind === 'bus' ? 3.2 : preset.height * 1.25;
+        dist = input.vehicleKind === 'supercar' ? preset.distance * 1.48 : input.vehicleKind === 'launch' ? 12.0 : input.vehicleKind === 'bus' ? 9.8 : preset.distance * 1.35;
+        height = input.vehicleKind === 'supercar' ? preset.height * 0.95 : input.vehicleKind === 'launch' ? 4.2 : input.vehicleKind === 'bus' ? 3.2 : preset.height * 1.25;
       }
     }
 

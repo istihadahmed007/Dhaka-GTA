@@ -281,20 +281,21 @@ export function stepVehicleKinematics(
 
   // --- Lateral Tire Grip & Drift Dynamics ---
   // Normal static tire grip restores lateral velocity quickly
-  const normalGrip = spec.kind === 'bike' ? 22 : spec.kind === 'sedan' ? 16 : 14;
+  const normalGrip = spec.kind === 'supercar' ? 24 : spec.kind === 'bike' ? 22 : spec.kind === 'sedan' ? 16 : 14;
   let isDrifting = false;
 
   if (input.handbrake && spec.canDrift && Math.abs(vLong) > 3.0) {
     // Handbrake drift: lateral grip breaks on rear tires!
     isDrifting = true;
     // Induce lateral kick in direction of steering
-    vLat += -Math.sign(input.steer || v.steerAngle || 1) * Math.min(6.5, Math.abs(vLong) * 0.35) * safeDt * 4.5;
+    const kickMult = spec.kind === 'supercar' ? 5.8 : 4.5;
+    vLat += -Math.sign(input.steer || v.steerAngle || 1) * Math.min(6.5, Math.abs(vLong) * 0.35) * safeDt * kickMult;
     // Sliding friction damping
     vLat *= Math.max(0, 1 - 2.8 * safeDt);
   } else {
     // Check for power-slide / oversteer due to high lateral G
     const lateralG = Math.abs(vLong * (v.steerAngle / 0.55) * spec.turnRate);
-    const gripLimit = (spec.canDrift ? 11.5 : 8.5) * (hasSpoiler ? 1.25 : 1.0);
+    const gripLimit = (spec.kind === 'supercar' ? 14.5 : spec.canDrift ? 11.5 : 8.5) * (hasSpoiler ? 1.25 : 1.0);
 
     if (lateralG > gripLimit && Math.abs(vLong) > 9.0) {
       isDrifting = true;
@@ -336,7 +337,7 @@ export function stepVehicleKinematics(
   v.isDrifting = isDrifting;
 
   // Cumulative wheel rotation
-  const wheelRadius = spec.kind === 'bike' ? 0.32 : spec.kind === 'bus' || spec.kind === 'truck' ? 0.52 : 0.36;
+  const wheelRadius = spec.kind === 'supercar' ? 0.38 : spec.kind === 'bike' ? 0.32 : spec.kind === 'bus' || spec.kind === 'truck' ? 0.52 : 0.36;
   v.wheelRotation = (v.wheelRotation || 0) + (vLong * safeDt) / wheelRadius;
 
   // --- Suspension Pitch & Roll Dynamics ---
@@ -353,7 +354,7 @@ export function stepVehicleKinematics(
   } else {
     // 4-wheelers roll AWAY from turn (outward centrifugal lean)
     const turnCentrifugal = (v.steerAngle / 0.55) * speedRatio;
-    const rollScale = spec.kind === 'cng' ? 0.08 : spec.kind === 'bus' ? 0.065 : 0.045;
+    const rollScale = spec.kind === 'supercar' ? 0.028 : spec.kind === 'cng' ? 0.08 : spec.kind === 'bus' ? 0.065 : 0.045;
     const targetRoll = clamp(-turnCentrifugal * rollScale, -0.1, 0.1);
     v.roll = (v.roll || 0) + (targetRoll - (v.roll || 0)) * (1 - Math.exp(-12 * safeDt));
   }

@@ -967,6 +967,7 @@ export interface InitialVehicleSpawn {
 
 export const INITIAL_VEHICLES: InitialVehicleSpawn[] = [
   // Hero parked vehicles cleanly curbside near player spawn (-2.2, 35.2), clear of moving lanes
+  { id: 'v_starter_supercar', kind: 'supercar', x: 0.0, z: 27.5, heading: Math.PI, color: 0xef4444, driver: 'none' },
   { id: 'v_starter_cng', kind: 'cng', x: -6.4, z: 33.8, heading: Math.PI, color: 0x0f6a44, driver: 'none' },
   { id: 'v_starter_sedan', kind: 'sedan', x: 6.4, z: 27.5, heading: Math.PI, color: 0xe2e8f0, driver: 'none' },
   { id: 'v_starter_rickshaw', kind: 'rickshaw', x: -12, z: 39, heading: Math.PI * 0.5, color: 0xc62828, driver: 'none' },

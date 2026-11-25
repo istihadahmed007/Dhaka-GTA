@@ -115,20 +115,24 @@ export class DhakaAudioEngine {
         const baseFreq =
           vehicleKind === 'cng'
             ? 68
-            : vehicleKind === 'bike'
-              ? 88
-              : vehicleKind === 'launch'
-                ? 36
-                : vehicleKind === 'speedboat'
-                  ? 110
-                  : vehicleKind === 'jetski'
-                    ? 145
-                    : vehicleKind === 'bus' || vehicleKind === 'truck'
-                      ? 44
-                      : 58;
+            : vehicleKind === 'supercar'
+              ? 76
+              : vehicleKind === 'bike'
+                ? 88
+                : vehicleKind === 'launch'
+                  ? 36
+                  : vehicleKind === 'speedboat'
+                    ? 110
+                    : vehicleKind === 'jetski'
+                      ? 145
+                      : vehicleKind === 'bus' || vehicleKind === 'truck'
+                        ? 44
+                        : 58;
         this.engineOsc.type = vehicleKind === 'cng' || vehicleKind === 'jetski' ? 'square' : 'sawtooth';
-        this.engineOsc.frequency.setTargetAtTime(baseFreq + speedRatio * baseFreq * 1.9, t, 0.06);
-        this.engineGain.gain.setTargetAtTime(0.05 + speedRatio * 0.06, t, 0.08);
+        const pitchMult = vehicleKind === 'supercar' ? 2.75 : 1.9;
+        this.engineOsc.frequency.setTargetAtTime(baseFreq + speedRatio * baseFreq * pitchMult, t, 0.05);
+        const gainLevel = vehicleKind === 'supercar' ? 0.07 + speedRatio * 0.09 : 0.05 + speedRatio * 0.06;
+        this.engineGain.gain.setTargetAtTime(gainLevel, t, 0.07);
       } else {
         this.engineGain.gain.setTargetAtTime(0, t, 0.08);
       }

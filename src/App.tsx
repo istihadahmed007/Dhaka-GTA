@@ -117,6 +117,7 @@ const INITIAL_HUD: HudSnapshot = {
   activeCompanion: null,
   activeRobbery: null,
   policeSearchRadius: null,
+  motionTrajectoryActive: true,
 };
 
 export default function App() {
@@ -191,6 +192,7 @@ export default function App() {
   const handleCallContact = useCallback((c: any) => engineRef.current?.handleCallContact(c), []);
   const handleDepositMoney = useCallback((amt: number) => engineRef.current?.handleDepositMoney(amt), []);
   const handleSnapPhoto = useCallback(() => engineRef.current?.captureSnapshot(), []);
+  const handleToggleMotionTrajectory = useCallback(() => engineRef.current?.toggleMotionTrajectory(), []);
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-[#0b0e13]">
@@ -227,6 +229,7 @@ export default function App() {
           onCallContact={handleCallContact}
           onDepositMoney={handleDepositMoney}
           onSnapPhoto={handleSnapPhoto}
+          onToggleMotionTrajectory={handleToggleMotionTrajectory}
         />
       )}
 

@@ -22,6 +22,7 @@ interface GameHudProps {
   onCallContact?: (contact: PhoneContact) => void;
   onDepositMoney?: (amount: number) => void;
   onSnapPhoto?: () => void;
+  onToggleMotionTrajectory?: () => void;
 }
 
 const WEAPON_ORDER: WeaponId[] = ['fists', 'pistol', 'smg', 'shotgun'];
@@ -44,6 +45,7 @@ export const GameHud: React.FC<GameHudProps> = ({
   onCallContact,
   onDepositMoney,
   onSnapPhoto,
+  onToggleMotionTrajectory,
 }) => {
   // Delayed trailing damage ghost bar for player HP
   const [ghostHp, setGhostHp] = useState(hud.hp);
@@ -383,6 +385,27 @@ export const GameHud: React.FC<GameHudProps> = ({
             tabIndex={-1}
             onClick={(e) => {
               e.currentTarget.blur();
+              onToggleMotionTrajectory?.();
+            }}
+            aria-label="Toggle Fluid Motion Trajectory"
+            title={`Fluid Motion Trajectory [T] — ${hud.motionTrajectoryActive ? 'ENABLED' : 'DISABLED'}`}
+            className={`pointer-events-auto h-9 px-2.5 flex items-center gap-1.5 border transition-all cursor-pointer ${
+              hud.motionTrajectoryActive
+                ? 'bg-[#22c55e]/25 border-[#22c55e] text-[#4ade80] shadow-[0_0_14px_rgba(34,197,94,0.45)]'
+                : 'bg-[#10151c]/92 border-gray-600 text-gray-400 hover:border-gray-400'
+            }`}
+          >
+            <span className="font-display text-[9px] font-bold uppercase tracking-wider flex items-center gap-1.5">
+              <span className={`w-2 h-2 rounded-full ${hud.motionTrajectoryActive ? 'bg-[#22c55e] animate-pulse' : 'bg-gray-500'}`} />
+              MOTION [T]
+            </span>
+          </button>
+
+          <button
+            type="button"
+            tabIndex={-1}
+            onClick={(e) => {
+              e.currentTarget.blur();
               onOpenWardrobe();
             }}
             aria-label="Open character wardrobe"
@@ -700,14 +723,28 @@ export const GameHud: React.FC<GameHudProps> = ({
       {/* BOTTOM-RIGHT: Vehicle Speedometer & Integrity (only when driving) */}
       {hud.inVehicle && (
         <div
-          className="fixed bottom-4 right-4 bg-[#10151c]/92 border-r-4 border-[#e6a135] px-4 py-3 shadow-[0_8px_22px_rgba(0,0,0,0.75)] min-w-[185px]"
+          className={`fixed bottom-4 right-4 bg-[#10151c]/92 border-r-4 ${
+            hud.vehicleSpeedKmh > 90
+              ? 'border-[#ef4444] shadow-[0_0_24px_rgba(239,68,68,0.55)]'
+              : 'border-[#e6a135] shadow-[0_8px_22px_rgba(0,0,0,0.75)]'
+          } px-4 py-3 min-w-[185px] transition-all`}
           data-testid="hud-vehicle"
         >
           <div className="flex items-baseline justify-between gap-3">
-            <span className="font-display text-4xl font-extrabold text-[#f8f5ee] tabular-nums leading-none">
+            <span
+              className={`font-display text-4xl font-extrabold tabular-nums leading-none ${
+                hud.vehicleSpeedKmh > 95 ? 'text-[#ef4444]' : 'text-[#f8f5ee]'
+              }`}
+            >
               {hud.vehicleSpeedKmh}
             </span>
-            <span className="text-xs font-bold uppercase tracking-widest text-[#f5d07a]">KM/H</span>
+            <span
+              className={`text-xs font-bold uppercase tracking-widest ${
+                hud.vehicleSpeedKmh > 90 ? 'text-[#f87171]' : 'text-[#f5d07a]'
+              }`}
+            >
+              KM/H
+            </span>
           </div>
           <div className="mt-1 flex items-center justify-between gap-2">
             <span className="text-xs font-bold uppercase text-[#e2e8f0]">{hud.vehicleName}</span>
