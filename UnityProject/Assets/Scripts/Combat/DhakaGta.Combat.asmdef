@@ -1,0 +1,18 @@
+{
+    "name": "DhakaGta.Combat",
+    "rootNamespace": "DhakaGta.Combat",
+    "references": [
+        "DhakaGta.Core",
+        "DhakaGta.Data",
+        "DhakaGta.Character"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

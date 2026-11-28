@@ -1,0 +1,26 @@
+{
+    "name": "DhakaGta.Environment",
+    "rootNamespace": "DhakaGta.Environment",
+    "references": [
+        "DhakaGta.Core",
+        "DhakaGta.Data",
+        "DhakaGta.GIS",
+        "DhakaGta.World",
+        "DhakaGta.WorldGen",
+        "DhakaGta.Character",
+        "DhakaGta.Combat",
+        "DhakaGta.Vehicles",
+        "Unity.InputSystem",
+        "Unity.RenderPipelines.HighDefinition.Runtime",
+        "Unity.RenderPipelines.Core.Runtime"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

@@ -1,0 +1,31 @@
+{
+    "name": "DhakaGta.UI",
+    "rootNamespace": "DhakaGta.UI",
+    "references": [
+        "DhakaGta.Core",
+        "DhakaGta.Data",
+        "DhakaGta.GIS",
+        "DhakaGta.World",
+        "DhakaGta.WorldGen",
+        "DhakaGta.Environment",
+        "DhakaGta.Graphics",
+        "DhakaGta.Character",
+        "DhakaGta.Vehicles",
+        "DhakaGta.Combat",
+        "DhakaGta.TrafficAI",
+        "DhakaGta.Missions",
+        "DhakaGta.Networking",
+        "UnityEngine.UI",
+        "Unity.TextMeshPro",
+        "Unity.InputSystem"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

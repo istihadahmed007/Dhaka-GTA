@@ -35,6 +35,7 @@ export interface PersistentAccount {
   name: string;
   token: string;
   pin?: string;
+  protagonistId: 'tariq' | 'maya';
   outfit: OutfitId;
   color: number;
   money: number;
@@ -43,6 +44,9 @@ export interface PersistentAccount {
   weapon: WeaponId;
   unlockedWeapons: WeaponId[];
   ammo: Record<WeaponId, number>;
+  inventory: Record<string, number>;
+  ownedVehicleIds: string[];
+  completedMissionIds: string[];
   lastX: number;
   lastY: number;
   lastZ: number;
@@ -76,6 +80,7 @@ export class AccountStore {
     pin?: string,
     preferredOutfit: OutfitId = 'street',
     preferredColor = 0x26466d,
+    preferredProtagonist: 'tariq' | 'maya' = 'tariq',
   ): AuthResult {
     const cleanName = (name || '').trim().slice(0, 16);
     if (!cleanName || !/^[a-zA-Z0-9_\-\u0980-\u09FF ]{2,16}$/.test(cleanName)) {
@@ -137,6 +142,7 @@ export class AccountStore {
       name: cleanName,
       token: newToken,
       pin: pin ? hashPin(pin.trim().slice(0, 8)) : undefined,
+      protagonistId: preferredProtagonist,
       outfit: preferredOutfit,
       color: preferredColor,
       money: 1200, // Starter Taka
@@ -150,6 +156,12 @@ export class AccountStore {
         smg: 0,
         shotgun: 0,
       },
+      inventory: {
+        cha_flask: 2,
+        item_first_aid: 1,
+      },
+      ownedVehicleIds: [],
+      completedMissionIds: [],
       lastX: -2.2,
       lastY: 0,
       lastZ: 35.2,
@@ -177,7 +189,25 @@ export class AccountStore {
 
   public updateStats(
     id: string,
-    updates: Partial<Pick<PersistentAccount, 'money' | 'kills' | 'deaths' | 'weapon' | 'lastX' | 'lastY' | 'lastZ' | 'lastHeading'>>,
+    updates: Partial<
+      Pick<
+        PersistentAccount,
+        | 'money'
+        | 'kills'
+        | 'deaths'
+        | 'weapon'
+        | 'protagonistId'
+        | 'unlockedWeapons'
+        | 'ammo'
+        | 'inventory'
+        | 'ownedVehicleIds'
+        | 'completedMissionIds'
+        | 'lastX'
+        | 'lastY'
+        | 'lastZ'
+        | 'lastHeading'
+      >
+    >,
   ): void {
     const acc = this.accounts.get(id);
     if (!acc) return;
@@ -185,6 +215,12 @@ export class AccountStore {
     if (updates.kills !== undefined) acc.kills = updates.kills;
     if (updates.deaths !== undefined) acc.deaths = updates.deaths;
     if (updates.weapon !== undefined) acc.weapon = updates.weapon;
+    if (updates.protagonistId !== undefined) acc.protagonistId = updates.protagonistId;
+    if (updates.unlockedWeapons !== undefined) acc.unlockedWeapons = [...updates.unlockedWeapons];
+    if (updates.ammo !== undefined) acc.ammo = { ...updates.ammo };
+    if (updates.inventory !== undefined) acc.inventory = { ...updates.inventory };
+    if (updates.ownedVehicleIds !== undefined) acc.ownedVehicleIds = [...updates.ownedVehicleIds];
+    if (updates.completedMissionIds !== undefined) acc.completedMissionIds = [...updates.completedMissionIds];
     if (updates.lastX !== undefined) acc.lastX = updates.lastX;
     if (updates.lastY !== undefined) acc.lastY = updates.lastY;
     if (updates.lastZ !== undefined) acc.lastZ = updates.lastZ;
@@ -238,6 +274,11 @@ export class AccountStore {
       if (Array.isArray(records)) {
         for (const r of records) {
           if (r.id && r.name && r.token) {
+            r.protagonistId ??= 'tariq';
+            r.inventory ??= { cha_flask: 2, item_first_aid: 1 };
+            r.ownedVehicleIds ??= [];
+            r.completedMissionIds ??= [];
+            r.unlockedWeapons ??= ['fists', 'pistol'];
             this.accounts.set(r.id, r);
             this.nameToId.set(r.name.toLowerCase(), r.id);
             this.tokenToId.set(r.token, r.id);

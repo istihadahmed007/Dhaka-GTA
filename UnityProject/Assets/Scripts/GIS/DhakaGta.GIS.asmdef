@@ -1,0 +1,17 @@
+{
+    "name": "DhakaGta.GIS",
+    "rootNamespace": "DhakaGta.GIS",
+    "references": [
+        "DhakaGta.Core",
+        "DhakaGta.Data"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

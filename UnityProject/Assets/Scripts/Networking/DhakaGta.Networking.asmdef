@@ -1,0 +1,21 @@
+{
+    "name": "DhakaGta.Networking",
+    "rootNamespace": "DhakaGta.Networking",
+    "references": [
+        "DhakaGta.Core",
+        "DhakaGta.Data",
+        "DhakaGta.Character",
+        "DhakaGta.Vehicles",
+        "DhakaGta.Combat",
+        "DhakaGta.Missions"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

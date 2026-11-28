@@ -1,0 +1,42 @@
+{
+    "name": "DhakaGta.Tests.EditMode",
+    "rootNamespace": "DhakaGta.Tests.EditMode",
+    "references": [
+        "DhakaGta.Core",
+        "DhakaGta.Data",
+        "DhakaGta.GIS",
+        "DhakaGta.World",
+        "DhakaGta.WorldGen",
+        "DhakaGta.Environment",
+        "DhakaGta.Graphics",
+        "DhakaGta.Streaming",
+        "DhakaGta.Character",
+        "DhakaGta.TrafficAI",
+        "DhakaGta.Missions",
+        "DhakaGta.Networking",
+        "DhakaGta.Vehicles",
+        "DhakaGta.Combat",
+        "DhakaGta.UI",
+        "Unity.InputSystem",
+        "Unity.RenderPipelines.HighDefinition.Runtime",
+        "Unity.RenderPipelines.Core.Runtime"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false,
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ]
+}

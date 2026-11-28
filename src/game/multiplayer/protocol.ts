@@ -56,6 +56,7 @@ export interface NetTransform {
 export interface NetPlayerState {
   id: string;
   name: string;
+  protagonistId?: 'tariq' | 'maya';
   outfit: OutfitId;
   color: number;
   transform: NetTransform;
@@ -68,6 +69,9 @@ export interface NetPlayerState {
   wantedLevel: number;
   weapon: WeaponId;
   ammo: Record<WeaponId, number>;
+  inventory?: Record<string, number>;
+  ownedVehicleIds?: string[];
+  completedMissionIds?: string[];
   vehicleId: string | null;
   seat: 'driver' | 'passenger' | null;
   state: 'idle' | 'walk' | 'run' | 'sprint' | 'jump' | 'attack' | 'driving' | 'ko';
@@ -78,6 +82,8 @@ export interface NetPlayerState {
 
 export interface NetPlayerSnapshot {
   id: string;
+  name?: string;
+  protagonistId?: 'tariq' | 'maya';
   x: number;
   y: number;
   z: number;
@@ -108,6 +114,8 @@ export interface NetVehicleSnapshot {
   fuel: number;
   color: number;
   driverId: string | null;
+  ownerId?: string | null;
+  locked?: boolean;
   sirenOn: boolean;
   honkActive: boolean;
 }
@@ -128,6 +136,8 @@ export interface CAuthMsg {
   pin?: string; // Account security PIN
   outfit?: OutfitId;
   color?: number;
+  protagonistId?: 'tariq' | 'maya';
+  clientEngine?: 'unity' | 'web';
 }
 
 export interface CInputMsg {
@@ -180,6 +190,32 @@ export interface CPingMsg {
   clientTime: number;
 }
 
+export interface CUseItemMsg {
+  type: 'c_use_item';
+  itemId: string;
+}
+
+export interface CBuyVehicleMsg {
+  type: 'c_buy_vehicle';
+  vehicleKind: VehicleKind;
+}
+
+export interface CVehicleLockMsg {
+  type: 'c_vehicle_lock';
+  vehicleId: string;
+  locked: boolean;
+}
+
+export interface CSwitchProtagonistMsg {
+  type: 'c_switch_protagonist';
+  protagonistId: 'tariq' | 'maya';
+}
+
+export interface CProgressionSyncMsg {
+  type: 'c_progression_sync';
+  completedMissionId?: string;
+}
+
 export type ClientMessage =
   | CAuthMsg
   | CInputMsg
@@ -188,6 +224,11 @@ export type ClientMessage =
   | CAttackMsg
   | CChatMsg
   | CBuyItemMsg
+  | CUseItemMsg
+  | CBuyVehicleMsg
+  | CVehicleLockMsg
+  | CSwitchProtagonistMsg
+  | CProgressionSyncMsg
   | CPingMsg;
 
 // === SERVER-TO-CLIENT MESSAGES ===
@@ -288,6 +329,23 @@ export interface SErrorMsg {
   message: string;
 }
 
+export interface SAccountSyncMsg {
+  type: 's_account_sync';
+  money: number;
+  protagonistId: 'tariq' | 'maya';
+  inventory: Record<string, number>;
+  ownedVehicleIds: string[];
+  completedMissionIds: string[];
+  unlockedWeapons: WeaponId[];
+}
+
+export interface SAntiCheatAlertMsg {
+  type: 's_anticheat_alert';
+  strikes: number;
+  code: string;
+  message: string;
+}
+
 export type ServerMessage =
   | SAuthOkMsg
   | SAuthFailMsg
@@ -299,4 +357,6 @@ export type ServerMessage =
   | SPlayerJoinedMsg
   | SPlayerLeftMsg
   | STransactionResultMsg
+  | SAccountSyncMsg
+  | SAntiCheatAlertMsg
   | SErrorMsg;

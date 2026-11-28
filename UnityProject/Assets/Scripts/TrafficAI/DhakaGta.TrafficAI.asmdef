@@ -1,0 +1,23 @@
+{
+    "name": "DhakaGta.TrafficAI",
+    "rootNamespace": "DhakaGta.TrafficAI",
+    "references": [
+        "DhakaGta.Core",
+        "DhakaGta.Data",
+        "DhakaGta.GIS",
+        "DhakaGta.World",
+        "DhakaGta.WorldGen",
+        "DhakaGta.Environment",
+        "DhakaGta.Character",
+        "DhakaGta.Vehicles"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

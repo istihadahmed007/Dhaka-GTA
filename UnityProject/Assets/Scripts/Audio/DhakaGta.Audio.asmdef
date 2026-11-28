@@ -1,0 +1,17 @@
+{
+    "name": "DhakaGta.Audio",
+    "rootNamespace": "DhakaGta.Audio",
+    "references": [
+        "DhakaGta.Core",
+        "DhakaGta.Data"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

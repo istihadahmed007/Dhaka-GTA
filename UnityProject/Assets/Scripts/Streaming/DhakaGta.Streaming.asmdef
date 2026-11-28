@@ -1,0 +1,17 @@
+{
+    "name": "DhakaGta.Streaming",
+    "rootNamespace": "DhakaGta.Streaming",
+    "references": [
+        "DhakaGta.Core",
+        "DhakaGta.Data"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

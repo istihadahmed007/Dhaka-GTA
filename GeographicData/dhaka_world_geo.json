@@ -1,0 +1,213 @@
+{
+  "attribution": "Stylized Dhaka layout derived from OpenStreetMap data (ODbL). Offline GIS reference for Dhaka-GTA Unity 6 HDRP.",
+  "origin": {
+    "name": "Shapla Crossing / Motijheel",
+    "lat": 23.733,
+    "lon": 90.417,
+    "metersPerDegLat": 110750,
+    "metersPerDegLon": 101850,
+    "stylizedScale": 0.085,
+    "worldHalfSizeMeters": 270.0,
+    "riverZStartMeters": 200.0
+  },
+  "verticalSliceDistrict": {
+    "id": "shapla_motijheel_slice",
+    "centerX": 0.0,
+    "centerZ": 0.0,
+    "streamingRadiusMeters": 140.0,
+    "additiveDistrictScene": "District_Motijheel_Core"
+  },
+  "landmarks": [
+    {
+      "osmId": "osm_node_shapla_chottor",
+      "kind": "monument",
+      "name": "Shapla Chottor Water Lily Monument",
+      "banglaName": "শাপলা চত্বর স্মৃতিস্তম্ভ",
+      "lat": 23.733,
+      "lon": 90.417,
+      "district": "shapla_crossing",
+      "stylizedX": 0.0,
+      "stylizedZ": 0.0,
+      "architecturalStyle": "water_lily_fountain"
+    },
+    {
+      "osmId": "osm_node_baitul_mukarram",
+      "kind": "mosque",
+      "name": "Baitul Mukarram National Mosque",
+      "banglaName": "বায়তুল মোকাররম জাতীয় মসজিদ",
+      "lat": 23.7312,
+      "lon": 90.4124,
+      "district": "shapla_crossing",
+      "stylizedX": 34.0,
+      "stylizedZ": 44.0,
+      "architecturalStyle": "national_mosque"
+    },
+    {
+      "osmId": "osm_way_bangladesh_bank",
+      "kind": "monument",
+      "name": "Bangladesh Bank Headquarters",
+      "banglaName": "বাংলাদেশ ব্যাংক ভবন",
+      "lat": 23.7315,
+      "lon": 90.419,
+      "district": "motijheel",
+      "stylizedX": 126.0,
+      "stylizedZ": 32.0,
+      "architecturalStyle": "motijheel_tower"
+    },
+    {
+      "osmId": "osm_way_kawran_bazar",
+      "kind": "market",
+      "name": "Kawran Bazar Wholesale Market Hall",
+      "banglaName": "কারওয়ান বাজার পাইকারি আড়ত",
+      "lat": 23.7512,
+      "lon": 90.3934,
+      "district": "kawran_flyover",
+      "stylizedX": -26.0,
+      "stylizedZ": -23.0,
+      "architecturalStyle": "market_hall"
+    },
+    {
+      "osmId": "osm_way_kawran_flyover",
+      "kind": "flyover",
+      "name": "Dhaka Elevated Express Flyover",
+      "banglaName": "ঢাকা এলিভেটেড এক্সপ্রেস ফ্লাইওভার",
+      "lat": 23.754,
+      "lon": 90.3995,
+      "district": "kawran_flyover",
+      "stylizedX": -64.0,
+      "stylizedZ": -64.0,
+      "architecturalStyle": "elevated_viaduct"
+    },
+    {
+      "osmId": "osm_node_sadarghat_terminal",
+      "kind": "terminal",
+      "name": "Sadarghat Launch Terminal",
+      "banglaName": "সদরঘাট লঞ্চ টার্মিনাল",
+      "lat": 23.7052,
+      "lon": 90.4135,
+      "district": "sadarghat",
+      "stylizedX": 0.0,
+      "stylizedZ": 191.0,
+      "architecturalStyle": "riverfront_terminal"
+    },
+    {
+      "osmId": "osm_way_ahsan_manzil",
+      "kind": "palace",
+      "name": "Ahsan Manzil (Pink Palace)",
+      "banglaName": "আহসান মঞ্জিল",
+      "lat": 23.7086,
+      "lon": 90.406,
+      "district": "sadarghat",
+      "stylizedX": -84.0,
+      "stylizedZ": 166.0,
+      "architecturalStyle": "pink_palace"
+    },
+    {
+      "osmId": "osm_way_lalbagh_fort",
+      "kind": "fort",
+      "name": "Lalbagh Fort",
+      "banglaName": "লালবাগ কেল্লা",
+      "lat": 23.7196,
+      "lon": 90.3881,
+      "district": "old_dhaka",
+      "stylizedX": -188.0,
+      "stylizedZ": 124.0,
+      "architecturalStyle": "mughal_fort"
+    },
+    {
+      "osmId": "osm_way_shakhari_bazar",
+      "kind": "market",
+      "name": "Shakhari Bazar Heritage Lane",
+      "banglaName": "শাঁখারী বাজার",
+      "lat": 23.7121,
+      "lon": 90.4112,
+      "district": "old_dhaka",
+      "stylizedX": -34.0,
+      "stylizedZ": 164.0,
+      "architecturalStyle": "old_dhaka_heritage"
+    },
+    {
+      "osmId": "osm_node_tara_masjid",
+      "kind": "mosque",
+      "name": "Tara Masjid (Star Mosque)",
+      "banglaName": "তারা মসজিদ",
+      "lat": 23.7154,
+      "lon": 90.4018,
+      "district": "old_dhaka",
+      "stylizedX": -122.0,
+      "stylizedZ": 164.0,
+      "architecturalStyle": "star_mosque"
+    },
+    {
+      "osmId": "osm_way_hatirjheel_lake",
+      "kind": "lake",
+      "name": "Hatirjheel Lake & Rainbow Arch Bridge",
+      "banglaName": "হাতিরঝিল লেক ও আর্চ ব্রিজ",
+      "lat": 23.7698,
+      "lon": 90.412,
+      "district": "gulshan",
+      "stylizedX": 104.0,
+      "stylizedZ": -32.0,
+      "architecturalStyle": "rainbow_arch_bridge"
+    },
+    {
+      "osmId": "osm_way_dhanmondi_lake",
+      "kind": "lake",
+      "name": "Dhanmondi Lake & Rabindra Sarobar",
+      "banglaName": "ধানমন্ডি লেক ও রবীন্দ্র সরোবর",
+      "lat": 23.7465,
+      "lon": 90.3782,
+      "district": "dhanmondi",
+      "stylizedX": -184.0,
+      "stylizedZ": -32.0,
+      "architecturalStyle": "lake_promenade"
+    },
+    {
+      "osmId": "osm_node_gulshan_circle_1",
+      "kind": "monument",
+      "name": "Gulshan Circle 1 Landmark Tower",
+      "banglaName": "গুলশান ১ সার্কেল টাওয়ার",
+      "lat": 23.7785,
+      "lon": 90.4162,
+      "district": "gulshan",
+      "stylizedX": 45.0,
+      "stylizedZ": -43.0,
+      "architecturalStyle": "gulshan_tower"
+    },
+    {
+      "osmId": "osm_node_mirpur_10",
+      "kind": "market",
+      "name": "Mirpur 10 Roundabout & Bazaar Emporium",
+      "banglaName": "মিরপুর ১০ গোলচত্বর বাজার",
+      "lat": 23.8072,
+      "lon": 90.3685,
+      "district": "mirpur_market",
+      "stylizedX": -124.0,
+      "stylizedZ": -184.0,
+      "architecturalStyle": "bazaar_complex"
+    },
+    {
+      "osmId": "osm_way_uttara_metro",
+      "kind": "metro",
+      "name": "Dhaka Metro Rail (MRT-6) Station & Plaza",
+      "banglaName": "ঢাকা মেট্রোরেল উত্তরা স্টেশন",
+      "lat": 23.869,
+      "lon": 90.3965,
+      "district": "uttara_north",
+      "stylizedX": 24.0,
+      "stylizedZ": -242.0,
+      "architecturalStyle": "metro_station"
+    }
+  ],
+  "corridors": [
+    { "roadId": "ave_ns_central", "name": "Kazi Nazrul Islam Ave", "banglaName": "কাজী নজরুল ইসলাম এভিনিউ", "x1": 0, "z1": -144, "x2": 0, "z2": 192, "width": 16, "tier": "avenue" },
+    { "roadId": "ave_ew_central", "name": "Toyenbee Circular Rd", "banglaName": "টয়েনবি সার্কুলার রোড", "x1": -244, "z1": 0, "x2": 244, "z2": 0, "width": 16, "tier": "avenue" },
+    { "roadId": "ave_metro_line6", "name": "MRT-6 Metro Viaduct", "banglaName": "মেট্রোরেল লাইন ৬ ভায়াডাক্ট", "x1": 0, "z1": -244, "x2": 0, "z2": -144, "width": 16, "tier": "avenue" },
+    { "roadId": "blvd_ns_w1", "name": "Mirpur Road", "banglaName": "মিরপুর রোড", "x1": -64, "z1": -232, "x2": -64, "z2": 192, "width": 13, "tier": "boulevard" },
+    { "roadId": "blvd_ns_e1", "name": "Gulshan Avenue", "banglaName": "গুলশান এভিনিউ", "x1": 64, "z1": -232, "x2": 64, "z2": 192, "width": 13, "tier": "boulevard" },
+    { "roadId": "blvd_ew_n1", "name": "Hatirjheel Link Rd", "banglaName": "হাতিরঝিল লিংক রোড", "x1": -232, "z1": -64, "x2": 232, "z2": -64, "width": 13, "tier": "boulevard" },
+    { "roadId": "blvd_ew_s1", "name": "Nawabpur Road", "banglaName": "নবাবপুর রোড", "x1": -232, "z1": 64, "x2": 232, "z2": 64, "width": 13, "tier": "boulevard" },
+    { "roadId": "street_motijheel_1", "name": "Dilkusha C/A", "banglaName": "দিলকুশা বাণিজ্যিক এলাকা", "x1": 104, "z1": 0, "x2": 104, "z2": 144, "width": 9, "tier": "street" },
+    { "roadId": "ave_sadarghat", "name": "Sadarghat Launch Rd", "banglaName": "সদরঘাট লঞ্চ রোড", "x1": -232, "z1": 186, "x2": 232, "z2": 186, "width": 14, "tier": "avenue" }
+  ]
+}

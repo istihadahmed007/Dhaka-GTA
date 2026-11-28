@@ -1,0 +1,27 @@
+{
+    "name": "DhakaGta.Graphics",
+    "rootNamespace": "DhakaGta.Graphics",
+    "references": [
+        "DhakaGta.Core",
+        "DhakaGta.Data",
+        "DhakaGta.GIS",
+        "DhakaGta.World",
+        "DhakaGta.WorldGen",
+        "DhakaGta.Environment",
+        "DhakaGta.Character",
+        "DhakaGta.Vehicles",
+        "Unity.InputSystem",
+        "Unity.Cinemachine",
+        "Unity.RenderPipelines.HighDefinition.Runtime",
+        "Unity.RenderPipelines.Core.Runtime"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
